@@ -1,9 +1,9 @@
 {
-    "name": "twetech/nestogy",
+    "name": "fbs/trpay",
     "type": "project",
     "autoload": {
         "psr-4": {
-            "Twetech\\Nestogy\\": "src/"
+            "Fbs\\trpay\\": "src/"
         }
     },
     "authors": [
@@ -17,6 +17,7 @@
         "tomorrow-ideas/plaid-sdk-php": "^1.0",
         "minishlink/web-push": "^9.0",
         "markrogoyski/math-php": "^2.10",
-        "php-ai/php-ml": "^0.10.0"
+        "php-ai/php-ml": "^0.10.0",
+        "phpmailer/phpmailer": "^6.10"
     }
 }

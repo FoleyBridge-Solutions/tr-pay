@@ -1,6 +1,6 @@
 <?php
 
-namespace Twetech\Nestogy\Auth;
+namespace Fbs\trpay\Auth;
 
 class Auth {
     protected $pdo;
@@ -13,7 +13,7 @@ class Auth {
     private $maxIPAttempts = 30;
     private $ipLockoutTime = 3600; // in seconds (1 hour)
 
-    public function __construct($pdo) {
+    public function __construct(\PDO $pdo) {
         $this->pdo = $pdo;
     }
 
@@ -22,82 +22,59 @@ class Auth {
     }
 
     public function login($user) {
-        $user_id = $user['user_id'];
-        $user_name = $user['user_name'];
-        $user_role = $user['user_role'];
-        $user_avatar = $user['user_avatar'];
-        $remember_me = $user['remember_me'];
-        $user_encryption_ciphertext = $user['user_specific_encryption_ciphertext'];
-        $user_password = $user['user_password'];
-
-        // Decrypt the master key using the user's password
-        $site_encryption_master_key = $this->decryptUserSpecificKey($user_encryption_ciphertext, $user_password);
-
-        // Generate a session key and store it
-        generateUserSessionKey($site_encryption_master_key);
-
-        $_SESSION['user_id'] = $user_id;
-        $_SESSION['user_name'] = $user_name;
-        $_SESSION['user_role'] = $user_role;
-        $_SESSION['logged'] = true;
-        $_SESSION['user_avatar'] = $user_avatar;
-
-        if (isset($user['user_config_remember_me'])) {
-            if ($remember_me) {
-                $token = bin2hex(random_bytes(16));
-                $token_hash = password_hash($token, PASSWORD_DEFAULT);
-
-                // Store the token in the remember_tokens table
-                $stmt = $this->pdo->prepare('INSERT INTO remember_tokens (remember_token_token, remember_token_user_id, remember_token_created_at) VALUES (:token, :user_id, NOW())');
-                $stmt->execute(['token' => $token_hash, 'user_id' => $user_id]);
-
-                // Set a cookie with the token
-                setcookie(
-                    'remember_me', 
-                    $user['user_id'] . ':' . $token, 
-                    [
-                        'expires' => time() + $this->cookieDuration,
-                        'path' => '/',
-                        'domain' => '',  // Leave empty to use current domain
-                        'secure' => true,
-                        'httponly' => true,
-                        'samesite' => 'Lax'
-                    ]
-                );
-
-                // Extend session duration
-                ini_set('session.gc_maxlifetime', $this->cookieDuration);
-                session_set_cookie_params([
-                    'lifetime' => $this->cookieDuration,
-                    'path' => '/',
-                    'domain' => '',  // Leave empty to use current domain
-                    'secure' => true,
-                    'httponly' => true,
-                    'samesite' => 'Lax'
-                ]);
-
-                // Regenerate session ID
-                session_regenerate_id(true);
-            }
-        } else {
-            error_log("User config remember me not set");
-        }
-
-        header('Location: /public/');
+        error_log("Logging in user: " . $user['user_id']);
+        
+        $this->setSessionVariables($user);
+        
+        header('Location: /');
         exit;
     }
 
-    private function setUserEncryptionCiphertext($user) {
-        $user_encryption_ciphertext = $user['user_specific_encryption_ciphertext'];
-        $user_role = $user['user_role'];
-        $password = $user['user_password'];
+    private function setSessionVariables($user) {
+        $_SESSION['user_id'] = $user['user_id'];
+        $_SESSION['user_name'] = $user['user_name'];
+        $_SESSION['user_role'] = $user['user_role'];
+        $_SESSION['logged'] = true;
+        $_SESSION['user_avatar'] = $user['user_avatar'];
 
-        // Setup encryption session key
-        if (isset($user_encryption_ciphertext) && $user_role > 1) {
-            $site_encryption_master_key = decryptUserSpecificKey($user_encryption_ciphertext, $password);
-            generateUserSessionKey($site_encryption_master_key);
-        }
+        error_log("Session variables set: user_id=" . $_SESSION['user_id'] . ", user_name=" . $_SESSION['user_name']);
     }
+
+    public function createUser($user_name, $user_email, $password, $user_role = "admin", $user_avatar = null) {
+        // Check if email already exists
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM users WHERE user_email = :email');
+        $stmt->execute(['email' => $user_email]);
+        if ($stmt->fetchColumn() > 0) {
+            throw new \Exception('User email already exists.');
+        }
+
+        // Securely hash the password
+        $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+        error_log("Hashed password: " . $hashed_password);
+
+        // Insert user details into the database
+        $stmt = $this->pdo->prepare('INSERT INTO users (user_name, user_email, user_password, user_role, user_avatar, user_created_at) VALUES (:name, :email, :password, :role, :avatar, NOW())');
+        $stmt->execute([
+            'name' => $user_name,
+            'email' => $user_email,
+            'password' => $hashed_password,
+            'role' => $user_role,
+            'avatar' => $user_avatar
+        ]);
+
+        $user_id = $this->pdo->lastInsertId();
+        error_log("Created user with ID: " . $user_id);
+
+        // Retrieve the user from the database to verify the data
+        $stmt = $this->pdo->prepare('SELECT * FROM users WHERE user_id = :user_id');
+        $stmt->execute(['user_id' => $user_id]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        error_log("Newly created user data: " . print_r($user, true));
+
+        // Return the newly created user's ID
+        return $user_id;
+    }
+    
 
     private function decryptUserSpecificKey($user_encryption_ciphertext, $user_password) {
         //Get the IV, salt and ciphertext
@@ -125,72 +102,10 @@ class Auth {
         setcookie('remember_me', '', time() - 3600, '/', '', true, true);
         setcookie('user_encryption_session_key', '', time() - 3600, '/', '', true, true);
     
-        // Optionally, delete the token from the database
-        if (isset($_COOKIE['remember_me'])) {
-            list($user_id, $token) = explode(':', $_COOKIE['remember_me']);
-            $stmt = $pdo->prepare('DELETE FROM remember_tokens WHERE remember_token_user_id = :user_id');
-            $stmt->execute(['user_id' => $user_id]);
-        }
-
         session_unset();
     
         header('Location: /');
         exit;
-    }
-    
-    public function checkRememberMe() {
-        if (!isset($_SESSION['user_id']) && isset($_COOKIE['remember_me'])) {
-            list($user_id, $token) = explode(':', $_COOKIE['remember_me']);
-
-            // Retrieve the token from the remember_tokens table
-            $stmt = $this->pdo->prepare('SELECT remember_token_token FROM remember_tokens WHERE remember_token_user_id = :user_id ORDER BY remember_token_created_at DESC LIMIT 1');
-            $stmt->execute(['user_id' => $user_id]);
-            $stored_token_hash = $stmt->fetchColumn();
-
-            if ($stored_token_hash && password_verify($token, $stored_token_hash)) {
-                // Token is valid, log in the user
-                $user = $this->getUser($user_id);
-                if ($user) {
-                    // Extend session duration
-                    ini_set('session.gc_maxlifetime', $this->cookieDuration);
-                    session_set_cookie_params([
-                        'lifetime' => $this->cookieDuration,
-                        'path' => '/',
-                        'domain' => '', // Set to your domain
-                        'secure' => true,
-                        'httponly' => true,
-                        'samesite' => 'Lax' // Or 'Strict', 'None'
-                    ]);
-
-                    // Regenerate session ID to prevent fixation
-                    session_regenerate_id(true);
-
-                    // Manually send a new session cookie with updated parameters
-                    setcookie(
-                        session_name(),
-                        session_id(),
-                        [
-                            'expires' => time() + $this->cookieDuration,
-                            'path' => '/',
-                            'domain' => '', // Set to your domain
-                            'secure' => true,
-                            'httponly' => true,
-                            'samesite' => 'Lax' // Or 'Strict', 'None'
-                        ]
-                    );
-
-                    $user['remember_me'] = $user['user_config_remember_me'];
-
-                    $this->login($user);
-                } else {
-                    error_log("User not found for user_id: $user_id");
-                }
-            } else {
-                error_log("Token verification failed for user_id: $user_id");
-            }
-        } else {
-            error_log("No remember_me cookie set");
-        }
     }
 
     public function getUserAvatar($user_id) {
@@ -206,14 +121,27 @@ class Auth {
         }
 
         $stmt = $this->pdo->prepare('
-            SELECT * FROM users
-            LEFT JOIN user_settings ON user_settings.user_id = users.user_id
+            SELECT users.user_id, users.user_name, users.user_password, users.user_role, users.user_avatar, users.user_token
+            FROM users
             WHERE user_email = :email
         ');
+
+        error_log("Executing query: " . $stmt->queryString); // Log the query
         $stmt->execute(['email' => $email]);
         $user = $stmt->fetch();
 
-        if ($user && password_verify($password, $user['user_password'])) {
+        if ($user) {
+            error_log("User found: " . print_r($user, true));
+            error_log("Stored hashed password: " . $user['user_password']);
+        } else {
+            error_log("User not found for email: $email");
+            return false;
+        }
+
+        $password_verified = password_verify($password, $user['user_password']);
+        error_log("Password verification result: " . ($password_verified ? "true" : "false"));
+
+        if ($password_verified) {
             // Successful login; clear any failed attempts
             $this->clearFailedLogins($email);
 
@@ -224,12 +152,12 @@ class Auth {
                 'user_token' => $user['user_token'] ?? null,
                 'user_avatar' => $user['user_avatar'] ?? null,
                 'user_specific_encryption_ciphertext' => $user['user_specific_encryption_ciphertext'] ?? null,
-                'user_password' => $password,
-                'user_config_remember_me' => true
+                'user_password' => $password
             ];
         } else {
             // Failed login; record the attempt
             $this->recordFailedLogin($email);
+            error_log("Failed login attempt for email: $email");
             return false;
         }
     }
@@ -238,16 +166,35 @@ class Auth {
         if ($user_id === null) {
             $user_id = $_SESSION['user_id'];
         }
-        $stmt = $this->pdo->prepare('SELECT user_role FROM user_settings WHERE user_id = :user_id');
+        $stmt = $this->pdo->prepare('SELECT user_role FROM users WHERE user_id = :user_id');
         $stmt->execute(['user_id' => $user_id]);
         return $stmt->fetchColumn();
+    }
+
+    public function isRole($role) {
+        switch ($role) {
+            case 'admin':
+                return $this->getUserRole() == 'admin';
+            default:
+                return false;
+        }
+    }
+
+    public function updatePassword($user_id, $new_password) {
+        $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
+        $stmt = $this->pdo->prepare('UPDATE users SET user_password = :password WHERE user_id = :user_id');
+        return $stmt->execute(['password' => $hashed_password, 'user_id' => $user_id]);
+    }
+    public function updateUserField($user_id, $field, $value) {
+        $stmt = $this->pdo->prepare("UPDATE users SET $field = :value WHERE user_id = :user_id");
+        return $stmt->execute(['value' => $value, 'user_id' => $user_id]);
     }
 
     public function getUser($user_id = null) {
         if ($user_id === null) {
             $user_id = $_SESSION['user_id'];
         }
-        $stmt = $this->pdo->prepare('SELECT * FROM users LEFT JOIN user_settings ON user_settings.user_id = users.user_id WHERE users.user_id = :user_id');
+        $stmt = $this->pdo->prepare('SELECT * FROM users WHERE users.user_id = :user_id');
         $stmt->execute(['user_id' => $user_id]);
         return $stmt->fetch();
     }
@@ -260,80 +207,27 @@ class Auth {
     }
 
     public function getUsers() {
-        $stmt = $this->pdo->prepare('SELECT * FROM users LEFT JOIN user_settings ON user_settings.user_id = users.user_id ORDER BY user_archived_at ASC, user_status DESC, user_role ASC');
+        $stmt = $this->pdo->prepare('SELECT * FROM users ORDER BY user_archived_at ASC, user_role ASC');
         $stmt->execute();
         return $stmt->fetchAll($this->pdo::FETCH_ASSOC);
     }
 
-    public function checkClientAccess($user_id, $client_id, $type) {
-        $stmt = $this->pdo->prepare('SELECT * FROM user_client_restrictions WHERE restriction_user_id = :user_id AND restriction_client_id = :client_id');
-        $stmt->execute(['user_id' => $user_id, 'client_id' => $client_id]);
-        $restriction = $stmt->fetch($this->pdo::FETCH_ASSOC);
-
-        if ($restriction && $restriction['restriction_type'] == $type) {
-            return false;
-        }
-        return true;
+    private function generateUserSessionKey($encryptionMasterKey) {
+        // Generate a random session key
+        $sessionKey = bin2hex(random_bytes(32));
+    
+        // Store it in the session for encryption-related operations
+        $_SESSION['user_encryption_session_key'] = openssl_encrypt(
+            $sessionKey, 
+            'aes-128-cbc', 
+            $encryptionMasterKey, 
+            0, 
+            substr($encryptionMasterKey, 0, 16) // Using the first 16 bytes as IV
+        );
+    
+        return $sessionKey;
     }
-
-    public function checkClassAccess($user_id, $type, $class) {
-        $stmt = $this->pdo->prepare('SELECT * FROM user_class_restrictions WHERE restriction_user_id = :user_id');
-        $stmt->execute(['user_id' => $user_id]);
-        $restrictions = $stmt->fetchAll($this->pdo::FETCH_ASSOC);
-
-        foreach ($restrictions as $restriction) {
-            if (($restriction['restriction_type'] == $type && $restriction['restriction_class'] == $class) ||
-                ($restriction['restriction_type'] == $class && $restriction['restriction_class'] == $type)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    public function getCompany() {
-        $company_id = 1; // TODO: Don't hardcode this
-        $stmt = $this->pdo->prepare('SELECT * FROM companies WHERE company_id = :company_id');
-        $stmt->execute(['company_id' => $company_id]);
-        return $stmt->fetch();
-    }
-
-    public function getRecentActivitiesByUser($user_id = null) {
-        if ($user_id === null) {
-            $user_id = $_SESSION['user_id'];
-        }
-        $stmt = $this->pdo->prepare('SELECT * FROM logs
-        LEFT JOIN users ON users.user_id = logs.log_user_id
-        WHERE log_user_id = :user_id
-        ORDER BY log_created_at DESC LIMIT 10');
-        $stmt->execute(['user_id' => $user_id]);
-        return $stmt->fetchAll($this->pdo::FETCH_ASSOC);
-    }
-
-    public function getAllRecentActivities() {
-        $stmt = $this->pdo->prepare('SELECT * FROM logs
-        LEFT JOIN users ON users.user_id = logs.log_user_id
-        ORDER BY log_created_at DESC LIMIT 10');
-        $stmt->execute();
-        $logs = $stmt->fetchAll($this->pdo::FETCH_ASSOC);
-        
-        //Login Attempts
-        $stmt = $this->pdo->prepare('SELECT * FROM login_attempts ORDER BY attempt_time DESC LIMIT 10');
-        $stmt->execute();
-        $login_attempts = $stmt->fetchAll($this->pdo::FETCH_ASSOC);
-
-        $return_data = [];
-
-        foreach ($logs as $log) {
-            $return_data[] = $log;
-        }
-
-        foreach ($login_attempts as $login_attempt) {
-            $return_data[] = $login_attempt;
-        }
-
-        return $return_data;
-        
-    }
+    
 
     public function getMailQueue($sent = false) {
         $stmt = $this->pdo->prepare('SELECT * FROM email_queue WHERE email_status = :status ORDER BY email_queued_at DESC');

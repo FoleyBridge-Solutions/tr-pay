@@ -1,11 +1,11 @@
 <?php
 // src/Controller/HomeController.php
 
-namespace Twetech\Nestogy\Controller;
+namespace Fbs\trpay\Controller;
 
-use Twetech\Nestogy\Model\Client;
-use Twetech\Nestogy\View\View;
-use Twetech\Nestogy\Auth\Auth;
+use Fbs\trpay\Model\Client;
+use Fbs\trpay\View\View;
+use Fbs\trpay\Auth\Auth;
 
 /**
  * HomeController handles the main homepage functionality

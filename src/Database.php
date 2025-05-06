@@ -1,7 +1,7 @@
 <?php
 // src/Database.php
 
-namespace Twetech\Nestogy;
+namespace Fbs\Pcsre;
 
 use PDO;
 use PDOException;
@@ -10,12 +10,12 @@ class Database {
     private $pdo;
     private $error;
 
-    public function __construct($config) {
-        $host = $config['host'];
-        $db = $config['dbname'];
-        $user = $config['user'];
-        $pass = $config['pass'];
-        $charset = $config['charset'];
+    public function __construct($dbconfig) {
+        $host = $dbconfig['host'];
+        $db = $dbconfig['dbname'];
+        $user = $dbconfig['user'];
+        $pass = $dbconfig['pass'];
+        $charset = $dbconfig['charset'];
 
         $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
         $options = [

@@ -1,9 +1,9 @@
 <?php
 
-namespace Twetech\Nestogy\Core;
+namespace Fbs\trpay\Core;
 
-use Twetech\Nestogy\Auth\Auth;
-use Twetech\Nestogy\Database;
+use Fbs\trpay\Auth\Auth;
+use Fbs\trpay\Database;
 use NumberFormatter;
 
 /**
@@ -15,7 +15,8 @@ use NumberFormatter;
 class Router {
     private $routes = [];
     private $apiRoutes = [];
-    private $defaultPage = 'tickets';
+    private $defaultPage = 'home';
+    private $domain = "";
     private $currency_format;
     private $pdo;
 
@@ -26,13 +27,13 @@ class Router {
      */
     public function __construct($domain)
     {
-        $config = require '/var/www/itflow-ng/config/' . $domain . '/config.php';
+        $config = require 'config.php';
+        $this->domain = $domain;
         $database = new Database($config['db']);
         $this->pdo = $database->getConnection();
         $this->currency_format = numfmt_create($config['locale'], NumberFormatter::CURRENCY);
         $GLOBALS['currency_format'] = $this->currency_format;
         $this->registerRoutes();
-        $this->registerApiRoutes();
     }
 
     /**
@@ -41,98 +42,7 @@ class Router {
      * @return void
      */
     public function registerRoutes() {
-        //Blank route for Debugging
-        $this->add('debug', 'DebugController', 'index');
-
-        // Dashboard routes
-        $this->add('dashboard', 'DashboardController', 'index', ['month', 'year']);
-
-        // Client routes
-        $this->add('clients', 'ClientController', 'index');
-        $this->add('client', 'ClientController', 'show', ['client_id']);
-        $this->add('contact', 'ClientController', 'showContacts', ['client_id']);
-        $this->add('location', 'ClientController', 'showLocations', ['client_id']);
-
-        // Support routes
-        $this->add('tickets', 'SupportController', 'index', ['client_id', 'status', 'user_id', 'ticket_type']);
-        $this->add('ticket', 'SupportController', 'show', ['ticket_id']);
-        $this->add('inventory', 'InventoryController', 'index', ['location_id']);
-        $this->add('projects', 'ProjectController', 'index', ['client_id']);
-        $this->add('project', 'ProjectController', 'show', ['project_id']);
-
-        // Documentation routes
-        $this->add('documentations', 'DocumentationController', 'index');
-        $this->add('documentation', 'DocumentationController', 'show', ['documentation_type', 'client_id']);
-
-        // Trip routes
-        $this->add('trips', 'TripController', 'index', ['client_id']);
-        $this->add('trip', 'TripController', 'show', ['trip_id']);
-
-        // Accounting routes
-        $this->add('invoices', 'AccountingController', 'showInvoices', ['client_id']);
-        $this->add('invoice', 'AccountingController', 'showInvoice', ['invoice_id']);
-        $this->add('subscriptions','AccountingController','showSubscriptions',['client_id']);
-        $this->add('subscription','AccountingController','showSubscription',['subscription_id']);
-        $this->add('payments', 'AccountingController', 'showPayments', ['client_id']);
-        $this->add('payment', 'AccountingController', 'showPayment', ['payment_reference']);
-        $this->add('make_payment', 'AccountingController', 'makePayment', ['bank_transaction_id']);
-        $this->add('quotes', 'AccountingController', 'showQuotes', ['client_id']);
-        $this->add('quote', 'AccountingController', 'showQuote', ['quote_id']);
-        $this->add('contracts', 'AccountingController', 'showContracts', ['client_id']);
-        $this->add('contract', 'AccountingController', 'showContract', ['contract_id']);
-        $this->add('products', 'AccountingController', 'showProducts');
-        $this->add('product', 'AccountingController', 'showProduct', ['product_id']);
-        $this->add('statement', 'AccountingController', 'showStatement', ['client_id']);
-        $this->add('accounts', 'AccountingController', 'showAccounts');
-        $this->add('account', 'AccountingController', 'showAccount', ['account_id']);
-        $this->add('expenses', 'AccountingController', 'showExpenses', ['client_id']);
-        $this->add('expense', 'AccountingController', 'showExpense', ['expense_id']);
-        $this->add('unreconciled', 'AccountingController', 'showUnreconciledTransactions', ['type']);
-        
-        // Reports routes
-        $this->add('report', 'ReportsController', 'index', ['report']);
-
-        // Account Management routes
-        $this->add('aging_invoices', 'AccountManagementController', 'agingInvoices');
-        $this->add('closed_tickets', 'AccountManagementController', 'closedTickets');
-        $this->add('aging_tickets', 'AccountManagementController', 'agingTickets');
-        $this->add('clients_without_login', 'AccountManagementController', 'clientsWithoutLogin');
-        $this->add('clients_without_subscription', 'AccountManagementController', 'clientsWithoutSubscription');
-        $this->add('sales_pipeline', 'AccountManagementController', 'salesPipeline');
-
-        // Administration routes
-        $this->add('admin', 'AdministrationController', 'index', ['admin_page', 'sent']);
-
-        // Human Resources routes
-        $this->add('hr', 'HumanResourcesController', 'index', ['hr_page', 'pay_period', 'employee_id']);
-
-        // Course route
-        $this->add('learn', 'CourseController', 'index', ['course_id']);
-
-        // SOP route
-        $this->add('sop', 'SOPController', 'index', ['id', 'version']);
-    }
-
-    /**
-     * Register all API routes.
-     * 
-     * @return void
-     */
-    private function registerApiRoutes() {
-        // Invoice actions
-        $this->addApi('email_invoice', 'AccountingController', 'emailInvoice');
-        $this->addApi('cancel_invoice', 'AccountingController', 'cancelInvoice');
-        $this->addApi('delete_invoice', 'AccountingController', 'deleteInvoice');
-        $this->addApi('mark_invoice_sent', 'AccountingController', 'markInvoiceSent');
-        
-        // Project actions
-        $this->addApi('project_note_add', 'ProjectController', 'addNote');
-        
-        // Ticket actions
-        $this->addApi('delete_ticket', 'SupportController', 'deleteTicket');
-        
-        // Authentication actions
-        $this->addApi('logout', 'AuthController', 'logout');
+        require 'routes.php'; // This file defines the routes using $this->add() and $this->addApi()
     }
 
     /**
@@ -144,7 +54,7 @@ class Router {
      * @param array  $middlewares Optional middleware parameters
      * @return void
      */
-    public function add($route, $controller, $action, $middlewares = []) {
+    public function add($route, $controller, $action = 'index', $middlewares = []) {
         $this->routes[$route] = [
             'controller' => $controller,
             'action' => $action,
@@ -177,21 +87,24 @@ class Router {
      */
     public function dispatch()
     {
+        // Check if the request is for an API endpoint
+        if (isset($_GET['endpoint'])) {
+            $this->handleApiRequest();
+            return;
+        }
 
         // Get the page from the URL
         $page = $_GET['page'] ?? $this->defaultPage;
         $route = $this->routes[$page] ?? null;
 
-        
-
         // If the page is not found, handle the error
         if (!$route) {
-            $this->handleNotFound();
+            $this->handleNotFound($page);
             return;
         }
 
         // Get the controller and action from the route
-        $controller = "Twetech\\Nestogy\\Controller\\" . $route['controller'];
+        $controller = "Fbs\\Pcsre\\Controller\\" . $route['controller'];
         $action = $route['action'];
         $params = $this->getParams($route['middlewares']);
 
@@ -211,7 +124,8 @@ class Router {
                 call_user_func_array([$controllerInstance, $action], $params);
             }
         } else {
-            $this->handleNotFound();
+            $this->handleNotFound($controller."::".$action);
+            return;
         }
     }
 
@@ -254,10 +168,10 @@ class Router {
      * 
      * @return void
      */
-    private function handleNotFound()
+    private function handleNotFound($page)
     {
 
-        $view = new \Twetech\Nestogy\View\View();
+        $view = new \Fbs\trpay\View\View();
         $messages = [
             "Well, this is awkward. The page you're looking for ran away with the circus. Try searching for something else or double-check that URL!",
             "Oh no! The page you're looking for is on vacation. Try searching for something else or double-check that URL!",
@@ -269,7 +183,7 @@ class Router {
         ];
         $message = $messages[array_rand($messages)];
         $view->error([
-            'title' => 'Oops! Page not found',
+            'title' => 'Oops! Page \''.$page.'\' not found',
             'message' => $message
         ]);
     }
@@ -291,21 +205,27 @@ class Router {
         }
 
         try {
-            $controller = "Twetech\\Nestogy\\Controller\\" . $route['controller'];
-            $method = $route['method'];
-            
-            if ($_SERVER['REQUEST_METHOD'] !== $route['requestMethod']) {
-                throw new \Exception('Invalid request method');
-            }
+            try {
+                $controller = "Fbs\\Pcsre\\Controller\\" . $route['controller'];
+                $method = $route['method'];
+                
+                if ($_SERVER['REQUEST_METHOD'] !== $route['requestMethod']) {
+                    throw new \Exception('Invalid request method');
+                }
 
-            $controllerInstance = new $controller($this->pdo);
-            $requestData = json_decode(file_get_contents('php://input'), true) ?? [];
-            $result = $controllerInstance->$method($requestData);
-            
-            echo json_encode(['success' => true, 'data' => $result]);
-        } catch (\Exception $e) {
+                $controllerInstance = new $controller($this->pdo);
+                $requestData = json_decode(file_get_contents('php://input'), true) ?? [];
+                $result = $controllerInstance->$method($requestData);
+                
+                echo json_encode(['success' => true, 'data' => $result]);
+            } catch (\Exception $e) {
+                http_response_code(500);
+                echo json_encode(['error' => $e->getMessage()]);
+            }
+        } catch (\Throwable $e) {
             http_response_code(500);
-            echo json_encode(['error' => $e->getMessage()]);
+            error_log('Router Exception: ' . $e->getMessage() . ' Trace: ' . $e->getTraceAsString());
+            echo json_encode(['error' => 'Internal Server Error']);
         }
         exit;
     }

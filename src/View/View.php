@@ -1,7 +1,5 @@
 <?php
-// src/View/View.php
-
-namespace Twetech\Nestogy\View;
+namespace Fbs\trpay\View;
 use NumberFormatter;
 
 /**
@@ -19,7 +17,7 @@ class View {
      * @param bool   $client_page Whether to include the client navbar
      * @return void
      */
-    public function render($template, $data = [], $client_page = false) {
+    public function render($template, $data = []) {
         if ($template === 'error') {
             $this->error([
                 'title' => 'Programatic Error',
@@ -30,13 +28,10 @@ class View {
         extract($_SESSION);
         extract($data);
         $currency_format = numfmt_create('en_US', NumberFormatter::CURRENCY);
-        require "../src/View/header.php";
-        require "../src/View/navbar.php";
-        if ($client_page) {
-            require "../src/View/client_navbar.php";
-        }
-                 require "../src/View/$template.php";
-        require "../src/View/footer.php";
+        require "/var/www/itflow-ng/src/View/header.php";
+        require "/var/www/itflow-ng/src/View/navbar.php";
+        require "/var/www/itflow-ng/src/View/$template.php";
+        require "/var/www/itflow-ng/src/View/footer.php";
     }
 
     /**
@@ -47,6 +42,6 @@ class View {
      */
     public function error($message) {
         extract($message);
-        require "../src/View/error.php";
+        require "error.php";
     }
 }
