@@ -43,7 +43,7 @@ function renderSubMenu($menuItems, $class)
 
 <nav class="navbar navbar-expand-lg navbar-light bg-light">
     <div class="container-fluid">
-        <a class="navbar-brand" href="/">Burkhart Peterson Payment Gateway</a>
+        <a class="navbar-brand" href="/">Burkhart Peterson Payment Portal</a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
         </button>
@@ -60,3 +60,5 @@ function renderSubMenu($menuItems, $class)
     </div>
     <?php unset($_SESSION['alert_message'], $_SESSION['alert_type']); ?>
 <?php endif; ?>
+
+<div class="container mt-4">
