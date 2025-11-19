@@ -811,7 +811,11 @@ use App\Services\PaymentPlanCalculator;
             $this->currentStep--;
 
             // Special handling based on current step after decrementing
-            if ($this->currentStep === 5 && $this->isPaymentPlan) {
+            if ($this->currentStep === 3 && $this->hasProjectsToAccept) {
+                // Going back to project acceptance - reset to last project or first if all were accepted
+                $this->currentProjectIndex = max(0, count($this->pendingProjects) - 1);
+                $this->acceptTerms = false;
+            } elseif ($this->currentStep === 5 && $this->isPaymentPlan) {
                 // Going back to authorization from confirmation - keep plan settings
                 // No special handling needed, just clear transaction ID
                 $this->transactionId = null;

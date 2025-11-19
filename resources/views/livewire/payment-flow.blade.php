@@ -87,7 +87,7 @@
     @endif
 
     {{-- Step 3: Project Acceptance --}}
-    @if($currentStep === 3 && $hasProjectsToAccept)
+    @if($currentStep === 3 && $hasProjectsToAccept && isset($pendingProjects[$currentProjectIndex]))
         @php
             $project = $pendingProjects[$currentProjectIndex];
             $projectNumber = $currentProjectIndex + 1;
