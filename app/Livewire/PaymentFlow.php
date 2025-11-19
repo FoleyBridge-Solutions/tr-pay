@@ -283,6 +283,8 @@ use App\Services\PaymentPlanCalculator;
         
         if ($this->currentProjectIndex >= count($this->pendingProjects)) {
             // All projects accepted, proceed to invoice selection
+            // Reset index to last project so user can go back if needed
+            $this->currentProjectIndex = count($this->pendingProjects) - 1;
             $this->loadClientInvoices();
             $this->addAcceptedProjectsAsInvoices();
             $this->currentStep = 4; // Invoice Selection
