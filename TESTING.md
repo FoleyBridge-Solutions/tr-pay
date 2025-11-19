@@ -1,8 +1,8 @@
-# Testing Documentation - ITFlow Payment System
+# Testing Documentation - TR Pay Payment System
 
 ## Overview
 
-Comprehensive test suite for the ITFlow Laravel payment system with MiPaymentChoice integration.
+Comprehensive test suite for the TR Pay Laravel payment system with MiPaymentChoice integration.
 
 ## Test Summary
 

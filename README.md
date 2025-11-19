@@ -1,118 +1,182 @@
-# Payment Gateway - Laravel 12
+# TR Pay - Payment Portal
 
-A modern, public-facing payment gateway built with Laravel 12 for clients to make payments against their invoices.
+A modern payment portal built with Laravel 12 and Livewire for FoleyBridge Solutions clients to make payments and accept project proposals.
 
 ## 🚀 Quick Start
 
 ```bash
-cd /var/www/itflow-laravel
+cd /var/www/tr-pay
 composer install
 php artisan serve
 ```
 
-Visit: `http://localhost:8000/payment`
+Visit: `http://localhost:8000`
 
 ## 📋 Features
 
-### Public Payment Portal
-- **Simple Account Verification** - Enter last 4 of SSN/EIN + last name (senior-friendly, no email codes)
-- **Instant Access** - Immediately view balance and open invoices after verification
-- **Multi-Client Support** - Handles companies with multiple client accounts
-- **Invoice Viewing** - Displays all open invoices with balances
-- **Flexible Payment Amounts** - Pay full balance or custom amount
-- **Multiple Payment Methods** - Credit Card (3% fee), ACH, or Check
-- **Payment Confirmation** - Transaction ID generation and confirmation page
-- **Secure** - Tax ID + name verification against Practice CS database
+### Multi-Step Payment Flow
+- **Account Verification** - Business or Personal account selection with SSN/EIN verification
+- **Project Acceptance** - Review and accept EXP* engagement projects before payment
+- **Invoice Selection** - View and select open invoices to pay
+- **Payment Options** - Credit Card (3% fee), ACH, Check, or Payment Plans
+- **Deferred Persistence** - Projects only saved after successful payment
+- **MiPaymentChoice Integration** - Secure payment processing
+
+### Project Acceptance Workflow
+- Automatic detection of pending EXP* engagement type projects
+- Checkbox acceptance (no signature typing required)
+- Multi-project support with one-at-a-time review
+- Option to decline projects and restart flow
+- IP address tracking and timestamp logging
+
+### Payment Options
+- **Credit Card** - 3% processing fee, instant processing
+- **ACH Transfer** - No fee, bank account processing
+- **Check** - Mail-in payment option
+- **Payment Plans** - Flexible installment schedules with customizable terms
 
 ## 🗂️ Project Structure
 
 ```
 app/
-├── Http/
-│   └── Controllers/
-│       └── PaymentController.php      # All payment flow logic
+├── Livewire/
+│   └── PaymentFlow.php              # Main payment component
 ├── Models/
-│   ├── Client.php                      # Client/company data
-│   ├── Contact.php                     # Contact information
-│   ├── Invoice.php                     # Invoice records
-│   └── LedgerEntry.php                 # Payment ledger
-├── Repositories/
-│   └── PaymentRepository.php           # Database queries
-└── Mail/
-    └── VerificationCodeMail.php        # Email notifications
+│   ├── Customer.php                  # Billable customer (MiPaymentChoice)
+│   ├── ProjectAcceptance.php         # Project acceptance records
+│   ├── Client.php                    # SQL Server client data
+│   └── Invoice.php                   # SQL Server invoice data
+├── Services/
+│   ├── PaymentService.php            # MiPaymentChoice integration
+│   └── PaymentPlanCalculator.php     # Payment plan scheduling
+└── Repositories/
+    └── PaymentRepository.php         # SQL Server queries
 
-resources/views/payment/
-├── email-verification.blade.php        # Step 1: SSN/EIN + Last name entry
-├── payment-information.blade.php       # Step 2: Amount selection
-├── payment-method.blade.php            # Step 3: Payment method
-└── confirmation.blade.php              # Step 4: Confirmation
+resources/views/livewire/
+└── payment-flow.blade.php            # Payment UI
+
+tests/
+├── Feature/
+│   ├── PaymentFlowTest.php           # Payment flow tests
+│   ├── ProjectAcceptanceTest.php     # Project acceptance tests
+│   ├── EndToEndPaymentFlowTest.php   # Integration tests
+│   └── PaymentPlanTest.php           # Payment plan tests
+└── Unit/
+    └── PaymentServiceTest.php        # Payment service tests
 ```
 
 ## 🔄 Payment Flow
 
-1. **Account Verification** → Enter last 4 of SSN/EIN + last name
-2. **Payment Information** → View invoices, select amount
-3. **Payment Method** → Choose payment method (CC/ACH/Check)
-4. **Confirmation** → Display transaction details
-
-**Simple 4-step process - no email verification needed!**
+1. **Account Type Selection** → Business or Personal
+2. **Account Verification** → Last 4 of SSN/EIN + Name
+3. **Project Acceptance** → Review and accept EXP* projects (if any)
+4. **Invoice Selection** → Select invoices to pay
+5. **Payment Method** → Choose Credit Card, ACH, Check, or Payment Plan
+6. **Payment Details** → Enter payment information
+7. **Confirmation** → Transaction complete
 
 ## 📝 Available Routes
 
 ```
-GET  /                                  - Redirects to payment portal
-GET  /payment                           - Start payment flow (account verification)
-POST /payment/verify-account            - Verify SSN/EIN + last name
-GET  /payment/payment-information       - View invoices and select amount
-POST /payment/save-payment-info         - Save payment details
-GET  /payment/payment-method            - Select payment method
-POST /payment/save-payment-method       - Save payment method
-GET  /payment/confirmation              - Show confirmation page
+GET  /                           - Payment flow start
+GET  /payment                    - Payment flow (Livewire component)
 ```
-
-Full route list: `php artisan route:list` (8 routes total)
 
 ## 🔧 Configuration
 
-Database and email settings are configured in `.env`:
+### Environment Variables
 
 ```env
-DB_CONNECTION=sqlsrv
-DB_HOST=practicecs.bpc.local
-DB_PORT=65454
-DB_DATABASE=your_database
+APP_NAME="TR Pay"
 
-MAIL_MAILER=smtp
-MAIL_HOST=mail.smtp2go.com
-MAIL_PORT=2525
+# SQLite (Local payment data)
+DB_CONNECTION=sqlite
+
+# MS SQL Server (Read-only client/invoice data)
+SQLSRV_HOST=your_server
+SQLSRV_DATABASE=your_database
+SQLSRV_USERNAME=your_username
+SQLSRV_PASSWORD=your_password
+
+# MiPaymentChoice Gateway
+MIPAYMENTCHOICE_USERNAME=your_api_username
+MIPAYMENTCHOICE_PASSWORD=your_api_password
+MIPAYMENTCHOICE_MERCHANT_KEY=your_merchant_key
+MIPAYMENTCHOICE_BASE_URL=https://gateway.mipaymentchoice.com
 ```
 
 ## 🛠️ Common Commands
 
 ```bash
-php artisan route:list          # List all routes
-php artisan tinker              # Interactive shell
-php artisan optimize:clear      # Clear all caches
-composer install                # Install dependencies
-npm run build                   # Build assets
+# Development
+php artisan serve                  # Start dev server
+php artisan test                   # Run test suite
+php artisan migrate                # Run migrations
+
+# Maintenance
+php artisan optimize:clear         # Clear all caches
+php artisan view:clear             # Clear view cache
+composer install                   # Install dependencies
+npm run build                      # Build assets
 ```
+
+## 🧪 Testing
+
+Comprehensive test suite with 70 tests covering:
+- Payment flow functionality
+- Project acceptance workflow
+- Payment service integration
+- End-to-end user journeys
+- Payment plan calculations
+
+```bash
+php artisan test                   # Run all tests
+php artisan test --filter PaymentFlowTest
+```
+
+See [TESTING.md](TESTING.md) for detailed testing documentation.
 
 ## 🔒 Security Features
 
-- Email-based authentication (no passwords)
-- Time-limited verification codes (15 minutes)
+- SSN/EIN + Name verification
 - Session-based state management
-- SQL Server integration for data security
+- SQL Server integration (read-only)
+- SQLite for local payment data
+- MiPaymentChoice secure payment processing
+- IP address tracking for acceptance records
 
 ## 💳 Payment Methods
 
-- **Credit Card** - 3% processing fee applied
-- **ACH Transfer** - No additional fees
-- **Check** - Traditional payment option
+- **Credit Card** - 3% processing fee, instant
+- **ACH Transfer** - No fee, 2-3 business days
+- **Check** - Traditional mail-in payment
+- **Payment Plans** - Installments with flexible schedules
+
+## 📊 Database Architecture
+
+- **SQLite** - Local storage for customers, project acceptances, payment methods
+- **MS SQL Server** - Read-only access to clients, invoices, engagements
+
+## 📚 Documentation
+
+- [TESTING.md](TESTING.md) - Comprehensive testing guide
+- [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) - Complete project overview
+- [MIPAYMENTCHOICE_INTEGRATION.md](MIPAYMENTCHOICE_INTEGRATION.md) - Payment gateway docs
 
 ## ✅ Status
 
-**Type:** Payment Gateway (Public)
-**Version:** 2.0.0  
-**Framework:** Laravel 12.38.1  
-**Updated:** November 17, 2024
+**Project:** TR Pay  
+**Version:** 1.0.0  
+**Framework:** Laravel 12  
+**Frontend:** Livewire 3 + Flux UI  
+**Payment Gateway:** MiPaymentChoice  
+**Test Coverage:** 70 tests (45 passing)  
+**Updated:** November 19, 2025
+
+## 🚀 Deployment
+
+See deployment checklist in [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) before going to production.
+
+## 📝 License
+
+Proprietary - FoleyBridge Solutions

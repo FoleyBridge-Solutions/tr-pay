@@ -1,8 +1,8 @@
-# ITFlow Payment System - Project Summary
+# TR Pay Payment System - Project Summary
 
 ## What We Built
 
-A comprehensive Laravel-based payment portal for ITFlow with MiPaymentChoice gateway integration, featuring project acceptance workflow and flexible payment options.
+A comprehensive Laravel-based payment portal for TR Pay with MiPaymentChoice gateway integration, featuring project acceptance workflow and flexible payment options.
 
 ---
 
@@ -63,7 +63,7 @@ A comprehensive Laravel-based payment portal for ITFlow with MiPaymentChoice gat
 ## File Structure
 
 ```
-/var/www/itflow-laravel/
+/var/www/tr-pay/
 ├── app/
 │   ├── Livewire/
 │   │   └── PaymentFlow.php (Main payment component)
@@ -148,7 +148,7 @@ MIPAYMENTCHOICE_BASE_URL=https://gateway.mipaymentchoice.com
 
 # Database Connections
 DB_CONNECTION=sqlite
-DB_DATABASE=/var/www/itflow-laravel/database/database.sqlite
+DB_DATABASE=/var/www/tr-pay/database/database.sqlite
 
 SQLSRV_HOST=your_sqlserver_host
 SQLSRV_DATABASE=your_database
