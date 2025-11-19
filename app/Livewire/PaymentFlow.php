@@ -1141,6 +1141,13 @@ use App\Services\PaymentPlanCalculator;
 
     public function render()
     {
+        // Safety check: ensure currentProjectIndex is valid
+        if ($this->hasProjectsToAccept && $this->currentStep === 3) {
+            if ($this->currentProjectIndex >= count($this->pendingProjects)) {
+                $this->currentProjectIndex = max(0, count($this->pendingProjects) - 1);
+            }
+        }
+        
         return view('livewire.payment-flow')->layout('layouts.app');
     }
 }
