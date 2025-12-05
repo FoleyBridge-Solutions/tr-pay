@@ -11,7 +11,7 @@
     <script src="https://js.stripe.com/v3/"></script>
     @livewireStyles
 </head>
-<body class="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500">
+<body class="min-h-screen bg-zinc-50 dark:bg-zinc-900">
     
     <div class="container mx-auto px-4 py-8 max-w-5xl">
         @yield('content')

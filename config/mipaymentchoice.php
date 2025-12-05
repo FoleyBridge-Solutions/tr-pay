@@ -15,6 +15,7 @@ return [
     'username' => env('MIPAYMENTCHOICE_USERNAME'),
     'password' => env('MIPAYMENTCHOICE_PASSWORD'),
     'merchant_key' => env('MIPAYMENTCHOICE_MERCHANT_KEY'),
+    'quickpayments_key' => env('MIPAYMENTCHOICE_QUICKPAYMENTS_KEY'),
 
     /*
     |--------------------------------------------------------------------------

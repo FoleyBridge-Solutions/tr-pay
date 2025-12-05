@@ -1,5 +1,9 @@
 # ⚠️⚠️⚠️ CRITICAL DATABASE INFORMATION ⚠️⚠️⚠️
 
+## ⚠️ DEVELOPMENT MODE - UPDATED CONFIGURATION ⚠️
+
+**IMPORTANT CHANGE**: The `sqlsrv` connection now points to **TEST_DB** for safe development.
+
 ## TWO SEPARATE DATABASES - DO NOT CONFUSE!
 
 ### 1. SQLite Database (Default - WRITABLE)
@@ -16,18 +20,22 @@
   - Any new tables we create
   - Customer models with Billable trait
 
-### 2. Microsoft SQL Server (READ-ONLY! DO NOT WRITE!)
-- **Connection Name**: `sqlsrv`
-- **Host**: `practicecs.bpc.local:65454`
-- **Database**: `CSP_345844_BurkhartPeterson`
-- **Owner**: ANOTHER APPLICATION (NOT US!)
-- **Permissions**: READ-ONLY
+### 2. Microsoft SQL Server - PracticeCS Test Database
+- **Connection Name**: `sqlsrv` (currently points to CSP_345844_TestDoNotUse)
+- **Host**: Configured via TEST_DB_HOST
+- **Database**: `CSP_345844_TestDoNotUse`
+- **Permissions**: FULL READ/WRITE access (for testing)
 - **Use for**:
   - Reading Client data
   - Reading Invoice data
   - Reading LedgerEntry data
-  - Reading Entity data
-  - NOTHING ELSE!
+  - Testing payment integration (SAFE to write)
+  - All PracticeCS operations during development
+
+### 3. Microsoft SQL Server - Production (NOT CURRENTLY USED)
+- **Database**: `CSP_345844_BurkhartPeterson`
+- **Status**: Not configured for use yet
+- **Future Use**: Will be configured when ready for production deployment
 
 ## NEVER EVER DO THIS:
 ```php
@@ -70,17 +78,29 @@ CREATE TABLE permission denied in database 'CSP_345844_BurkhartPeterson'
 This means `.env` has `DB_CONNECTION=sqlsrv` - CHANGE IT BACK TO `sqlite`!
 
 ## Environment Variable Settings
-**CORRECT .env settings:**
+**CURRENT .env settings (DEVELOPMENT MODE):**
 ```
 DB_CONNECTION=sqlite  # Default for migrations and app tables
 
-# SQL Server connection (READ-ONLY - only for explicit queries)
+# SQL Server connection - CURRENTLY USING CSP_345844_TestDoNotUse (SAFE FOR DEVELOPMENT)
 DB_HOST=practicecs.bpc.local
 DB_PORT=65454
-DB_DATABASE=CSP_345844_BurkhartPeterson
+DB_DATABASE=CSP_345844_BurkhartPeterson  # NOT CURRENTLY USED
 DB_USERNAME=graphana
 DB_PASSWORD=Tw3nt05!
+DB_ENCRYPT=yes
 DB_TRUST_SERVER_CERTIFICATE=true
+
+# Test Database (CURRENTLY IN USE FOR ALL MSSQL OPERATIONS)
+TEST_DB_HOST=${DB_HOST}
+TEST_DB_PORT=${DB_PORT}
+TEST_DB_DATABASE=CSP_345844_TestDoNotUse
+TEST_DB_USERNAME=${DB_USERNAME}
+TEST_DB_PASSWORD=${DB_PASSWORD}
+
+# PracticeCS Payment Integration (safe to enable - writes to test database)
+PRACTICECS_WRITE_ENABLED=false
+PRACTICECS_CONNECTION=sqlsrv  # Only connection available, points to test DB
 ```
 
 ## ⚠️⚠️⚠️ COMMON MISTAKE - DB QUERIES WITHOUT EXPLICIT CONNECTION

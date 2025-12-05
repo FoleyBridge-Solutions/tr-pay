@@ -7,8 +7,8 @@
             <flux:subheading class="text-center mb-8">Are you making a payment for a business or personal account?</flux:subheading>
             
             <div class="grid md:grid-cols-2 gap-6">
-                <button wire:click="selectAccountType('business')" type="button" class="h-48 flex flex-col items-center justify-center gap-4 rounded-lg border-2 border-zinc-300 hover:border-indigo-500 bg-white hover:bg-zinc-50 transition-colors">
-                    <svg class="w-16 h-16 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button wire:click="selectAccountType('business')" type="button" class="h-48 flex flex-col items-center justify-center gap-4 rounded-lg border-2 border-zinc-300 hover:border-zinc-500 bg-white hover:bg-zinc-50 transition-colors">
+                    <svg class="w-16 h-16 text-zinc-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
                     </svg>
                     <div>
@@ -17,8 +17,8 @@
                     </div>
                 </button>
                 
-                <button wire:click="selectAccountType('personal')" type="button" class="h-48 flex flex-col items-center justify-center gap-4 rounded-lg border-2 border-zinc-300 hover:border-indigo-500 bg-white hover:bg-zinc-50 transition-colors">
-                    <svg class="w-16 h-16 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button wire:click="selectAccountType('personal')" type="button" class="h-48 flex flex-col items-center justify-center gap-4 rounded-lg border-2 border-zinc-300 hover:border-zinc-500 bg-white hover:bg-zinc-50 transition-colors">
+                    <svg class="w-16 h-16 text-zinc-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
                     </svg>
                     <div>
@@ -51,7 +51,7 @@
                             Last 4 Digits of SSN
                         @endif
                     </flux:label>
-                    <flux:input wire:model="last4" placeholder="1234" maxlength="4" />
+                    <flux:input wire:model="last4" placeholder="1234" maxlength="4" wire:loading.attr="disabled" wire:target="verifyAccount" />
                     <flux:error name="last4" />
                     <flux:description>
                         @if($accountType === 'business')
@@ -65,22 +65,31 @@
                 @if($accountType === 'business')
                     <flux:field>
                         <flux:label>Legal Business Name</flux:label>
-                        <flux:input wire:model="businessName" placeholder="Acme Corporation, LLC" />
+                        <flux:input wire:model="businessName" placeholder="Acme Corporation, LLC" wire:loading.attr="disabled" wire:target="verifyAccount" />
                         <flux:error name="businessName" />
                         <flux:description>Enter exactly as shown on tax documents</flux:description>
                     </flux:field>
                 @else
                     <flux:field>
                         <flux:label>Last Name</flux:label>
-                        <flux:input wire:model="lastName" placeholder="Smith" />
+                        <flux:input wire:model="lastName" placeholder="Smith" wire:loading.attr="disabled" wire:target="verifyAccount" />
                         <flux:error name="lastName" />
                         <flux:description>Enter as shown on your account</flux:description>
                     </flux:field>
                 @endif
 
                 <div class="flex gap-3">
-                    <button wire:click="goBack" type="button" class="px-4 py-2 text-sm font-medium text-zinc-700 hover:text-zinc-900">Back</button>
-                    <button type="submit" class="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg">Continue</button>
+                    <button wire:click="goBack" type="button" class="px-4 py-2 text-sm font-medium text-zinc-700 hover:text-zinc-900" wire:loading.attr="disabled" wire:target="verifyAccount">Back</button>
+                    <button type="submit" class="flex-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-900 text-white font-medium rounded-lg flex items-center justify-center gap-2" wire:loading.attr="disabled" wire:target="verifyAccount">
+                        <span wire:loading.remove wire:target="verifyAccount">Continue</span>
+                        <span wire:loading wire:target="verifyAccount" class="flex items-center gap-2">
+                            <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Verifying Account...
+                        </span>
+                    </button>
                 </div>
             </form>
         </flux:card>
@@ -109,37 +118,37 @@
             </div>
 
             {{-- Project Details Card --}}
-            <div class="bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-950 dark:to-blue-950 border-2 border-indigo-300 rounded-lg p-6 mb-6">
-                <flux:heading size="lg" class="mb-4 text-indigo-900 dark:text-indigo-100">
+            <div class="bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-950 dark:to-blue-950 border-2 border-zinc-300 rounded-lg p-6 mb-6">
+                <flux:heading size="lg" class="mb-4 text-zinc-900 dark:text-zinc-100">
                     {{ $project['project_name'] }}
                 </flux:heading>
                 
                 <div class="grid md:grid-cols-2 gap-4 mb-4">
                     <div>
-                        <flux:subheading class="text-sm text-indigo-700 dark:text-indigo-300">Project ID</flux:subheading>
+                        <flux:subheading class="text-sm text-zinc-700 dark:text-zinc-300">Project ID</flux:subheading>
                         <flux:text class="font-mono">{{ $project['engagement_id'] }}</flux:text>
                     </div>
                     <div>
-                        <flux:subheading class="text-sm text-indigo-700 dark:text-indigo-300">Engagement Type</flux:subheading>
+                        <flux:subheading class="text-sm text-zinc-700 dark:text-zinc-300">Engagement Type</flux:subheading>
                         <flux:text>{{ $project['engagement_type'] }}</flux:text>
                     </div>
                     @if($project['start_date'])
                     <div>
-                        <flux:subheading class="text-sm text-indigo-700 dark:text-indigo-300">Start Date</flux:subheading>
+                        <flux:subheading class="text-sm text-zinc-700 dark:text-zinc-300">Start Date</flux:subheading>
                         <flux:text>{{ \Carbon\Carbon::parse($project['start_date'])->format('M d, Y') }}</flux:text>
                     </div>
                     @endif
                     @if($project['end_date'])
                     <div>
-                        <flux:subheading class="text-sm text-indigo-700 dark:text-indigo-300">End Date</flux:subheading>
+                        <flux:subheading class="text-sm text-zinc-700 dark:text-zinc-300">End Date</flux:subheading>
                         <flux:text>{{ \Carbon\Carbon::parse($project['end_date'])->format('M d, Y') }}</flux:text>
                     </div>
                     @endif
                 </div>
                 
-                <div class="bg-white dark:bg-zinc-900 rounded-lg p-4 border border-indigo-200 dark:border-indigo-700">
+                <div class="bg-white dark:bg-zinc-900 rounded-lg p-4 border border-zinc-200 dark:border-zinc-700">
                     <flux:subheading class="text-sm mb-2">Project Budget</flux:subheading>
-                    <flux:heading size="2xl" class="text-indigo-600 dark:text-indigo-400">
+                    <flux:heading size="2xl" class="text-zinc-800 dark:text-zinc-400">
                         ${{ number_format($project['budget_amount'], 2) }}
                     </flux:heading>
                 </div>
@@ -147,7 +156,7 @@
                 @if($project['notes'])
                 <div class="mt-4">
                     <flux:subheading class="text-sm mb-2">Project Notes</flux:subheading>
-                    <div class="bg-white dark:bg-zinc-900 rounded-lg p-4 border border-indigo-200 dark:border-indigo-700 text-sm">
+                    <div class="bg-white dark:bg-zinc-900 rounded-lg p-4 border border-zinc-200 dark:border-zinc-700 text-sm">
                         {{ $project['notes'] }}
                     </div>
                 </div>
@@ -183,7 +192,7 @@
                             <input 
                                 type="checkbox" 
                                 wire:model.live="acceptTerms" 
-                                class="mt-1 w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 dark:bg-zinc-800 dark:border-zinc-600"
+                                class="mt-1 w-5 h-5 text-zinc-800 rounded border-gray-300 focus:ring-indigo-500 dark:bg-zinc-800 dark:border-zinc-600"
                             >
                             <span class="text-sm text-zinc-700 dark:text-zinc-300 font-medium">
                                 I accept the terms and conditions for this project and agree to pay the stated budget amount.
@@ -279,22 +288,25 @@
                             return !isset($invoice['is_placeholder']) || !$invoice['is_placeholder'];
                         })->sum('open_amount');
                         $hasRealInvoices = $clientInvoiceCount > 0;
+                        
+                        // Sanitize client name for use as array key (must match PaymentFlow.php sanitizeClientKey method)
+                        $clientKey = md5($clientName);
                     @endphp
 
-                    <div class="mb-6 {{ $isPrimaryClient ? 'bg-white border-2 border-indigo-200' : 'bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-700' }} rounded-lg overflow-hidden">
+                    <div class="mb-6 {{ $isPrimaryClient ? 'bg-white border-2 border-zinc-200' : 'bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-700' }} rounded-lg overflow-hidden">
                         {{-- Client Header --}}
-                        <div class="px-6 py-4 {{ $isPrimaryClient ? 'bg-indigo-50 dark:bg-indigo-950 border-b border-indigo-200' : 'bg-amber-100 dark:bg-amber-900 border-b border-amber-300' }}">
+                        <div class="px-6 py-4 {{ $isPrimaryClient ? 'bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200' : 'bg-amber-100 dark:bg-amber-900 border-b border-amber-300' }}">
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center gap-3">
                                     @if($isPrimaryClient)
-                                        <div class="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center">
+                                        <div class="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center">
                                             <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
                                             </svg>
                                         </div>
                                         <div>
-                                            <flux:heading size="md" class="text-indigo-900 dark:text-indigo-100">{{ $clientName }}</flux:heading>
-                                            <flux:subheading class="text-sm text-indigo-700 dark:text-indigo-300">Your Account</flux:subheading>
+                                            <flux:heading size="md" class="text-zinc-900 dark:text-zinc-100">{{ $clientName }}</flux:heading>
+                                            <flux:subheading class="text-sm text-zinc-700 dark:text-zinc-300">Your Account</flux:subheading>
                                         </div>
                                     @else
                                         <div class="w-8 h-8 bg-amber-600 rounded-full flex items-center justify-center">
@@ -309,7 +321,7 @@
                                     @endif
                                 </div>
                                 <div class="text-right">
-                                    <div class="text-lg font-bold {{ $isPrimaryClient ? 'text-indigo-600' : 'text-amber-600' }}">
+                                    <div class="text-lg font-bold {{ $isPrimaryClient ? 'text-zinc-800' : 'text-amber-600' }}">
                                         ${{ number_format($clientTotal, 2) }}
                                     </div>
                                     <div class="text-sm text-zinc-600">
@@ -325,7 +337,7 @@
                                 <flux:table>
                                     <flux:table.columns>
                                         <flux:table.column>
-                                            <flux:switch wire:model.live="selectAll" label="Pay All" />
+                                            <flux:switch wire:model.live="clientSelectAll.{{ $clientKey }}" label="Pay All" />
                                         </flux:table.column>
                                         <flux:table.column>Invoice #</flux:table.column>
                                         <flux:table.column>Date</flux:table.column>
@@ -351,7 +363,7 @@
                                                 }
                                             @endphp
 
-                                            <flux:table.row class="{{ $isSelected ? 'bg-indigo-50 dark:bg-indigo-950' : '' }}" wire:key="invoice-{{ $invoice['invoice_number'] }}">
+                                            <flux:table.row class="{{ $isSelected ? 'bg-zinc-50 dark:bg-zinc-950' : '' }}" wire:key="invoice-{{ $invoice['invoice_number'] }}">
                                                 <flux:table.cell>
                                                     @if(!isset($invoice['is_placeholder']) || !$invoice['is_placeholder'])
                                                         <flux:switch 
@@ -424,10 +436,10 @@
                     </div>
                 </div>
                 
-                <div class="bg-indigo-50 dark:bg-indigo-900 p-4 rounded-lg mb-6">
+                <div class="bg-zinc-50 dark:bg-zinc-900 p-4 rounded-lg mb-6">
                     <div class="flex justify-between items-center">
                         <flux:heading size="lg">Selected Invoices Total:</flux:heading>
-                        <flux:heading size="lg" class="text-indigo-600">${{ number_format($paymentAmount, 2) }}</flux:heading>
+                        <flux:heading size="lg" class="text-zinc-800">${{ number_format($paymentAmount, 2) }}</flux:heading>
                     </div>
                     <div class="text-sm text-zinc-600 mt-1">
                         {{ count($selectedInvoices) }} of {{ $totalInvoiceCount }} invoices selected
@@ -457,7 +469,7 @@
 
                  <div class="flex gap-3">
                     <button wire:click="goBack" type="button" class="px-4 py-2 text-sm font-medium text-zinc-700 hover:text-zinc-900" wire:loading.attr="disabled">Back</button>
-                    <button wire:click="savePaymentInfo" type="button" class="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg flex items-center justify-center gap-2" wire:loading.attr="disabled">
+                    <button wire:click="savePaymentInfo" type="button" class="flex-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-900 text-white font-medium rounded-lg flex items-center justify-center gap-2" wire:loading.attr="disabled">
                         <span wire:loading.remove>Continue to Payment (${{ number_format($paymentAmount, 2) }})</span>
                         <span wire:loading>
                             <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -470,19 +482,19 @@
                 </div>
 
                 <div wire:loading class="mt-4">
-                    <div class="bg-indigo-100 dark:bg-indigo-900 rounded-lg p-4">
+                    <div class="bg-zinc-100 dark:bg-zinc-900 rounded-lg p-4">
                         <div class="flex items-center gap-3">
                             <div class="animate-pulse flex space-x-1">
-                                <div class="h-2 w-2 bg-indigo-600 rounded-full"></div>
-                                <div class="h-2 w-2 bg-indigo-600 rounded-full" style="animation-delay: 0.2s"></div>
-                                <div class="h-2 w-2 bg-indigo-600 rounded-full" style="animation-delay: 0.4s"></div>
+                                <div class="h-2 w-2 bg-zinc-800 rounded-full"></div>
+                                <div class="h-2 w-2 bg-zinc-800 rounded-full" style="animation-delay: 0.2s"></div>
+                                <div class="h-2 w-2 bg-zinc-800 rounded-full" style="animation-delay: 0.4s"></div>
                             </div>
-                            <div class="text-sm text-indigo-800 dark:text-indigo-200">
+                            <div class="text-sm text-zinc-800 dark:text-zinc-200">
                                 Preparing payment options...
                             </div>
                         </div>
-                        <div class="mt-2 bg-indigo-200 dark:bg-indigo-700 rounded-full h-1">
-                            <div class="bg-indigo-600 h-1 rounded-full animate-pulse" style="width: 60%"></div>
+                        <div class="mt-2 bg-zinc-200 dark:bg-zinc-900 rounded-full h-1">
+                            <div class="bg-zinc-800 h-1 rounded-full animate-pulse" style="width: 60%"></div>
                         </div>
                     </div>
                 </div>
@@ -500,7 +512,7 @@
                 <flux:heading size="xl" class="text-center mb-2">Select Payment Method</flux:heading>
                 <div class="text-center mb-8">
                     <flux:subheading>Payment Amount:</flux:subheading>
-                    <flux:heading size="2xl" class="text-indigo-600">${{ number_format($paymentAmount, 2) }}</flux:heading>
+                    <flux:heading size="2xl" class="text-zinc-800">${{ number_format($paymentAmount, 2) }}</flux:heading>
                 </div>
 
                 @error('payment_method')
@@ -510,21 +522,21 @@
                 @enderror
 
                 <div class="grid md:grid-cols-2 gap-6 mb-6">
-                    <button wire:click="selectPaymentMethod('credit_card')" type="button" class="h-40 flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-zinc-300 hover:border-indigo-500 bg-white hover:bg-zinc-50 transition-colors relative">
+                    <button wire:click="selectPaymentMethod('credit_card')" type="button" class="h-40 flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-zinc-300 hover:border-zinc-500 bg-white hover:bg-zinc-50 transition-colors relative">
                         <div wire:loading wire:target="selectPaymentMethod" class="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center">
-                            <div class="text-indigo-600">Processing...</div>
+                            <div class="text-zinc-800">Processing...</div>
                         </div>
-                        <svg class="w-12 h-12 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-12 h-12 text-zinc-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
                         </svg>
                         <div>
                             <div class="text-lg font-semibold text-zinc-900">Credit Card</div>
-                            <div class="text-sm text-zinc-600">3% fee applies</div>
+                            <div class="text-sm text-zinc-600">{{ config("payment-fees.credit_card_rate") * 100 }}% fee applies</div>
                         </div>
                     </button>
 
-                    <button wire:click="selectPaymentMethod('ach')" type="button" class="h-40 flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-zinc-300 hover:border-indigo-500 bg-white hover:bg-zinc-50 transition-colors">
-                        <svg class="w-12 h-12 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <button wire:click="selectPaymentMethod('ach')" type="button" class="h-40 flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-zinc-300 hover:border-zinc-500 bg-white hover:bg-zinc-50 transition-colors">
+                        <svg class="w-12 h-12 text-zinc-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"></path>
                         </svg>
                         <div>
@@ -533,8 +545,8 @@
                         </div>
                     </button>
 
-                    <button wire:click="selectPaymentMethod('check')" type="button" class="h-40 flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-zinc-300 hover:border-indigo-500 bg-white hover:bg-zinc-50 transition-colors">
-                        <svg class="w-12 h-12 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <button wire:click="selectPaymentMethod('check')" type="button" class="h-40 flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-zinc-300 hover:border-zinc-500 bg-white hover:bg-zinc-50 transition-colors">
+                        <svg class="w-12 h-12 text-zinc-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
                         </svg>
                         <div>
@@ -543,8 +555,8 @@
                         </div>
                     </button>
 
-                    <button wire:click="selectPaymentMethod('payment_plan')" type="button" class="h-40 flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-zinc-300 hover:border-indigo-500 bg-white hover:bg-zinc-50 transition-colors">
-                        <svg class="w-12 h-12 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <button wire:click="selectPaymentMethod('payment_plan')" type="button" class="h-40 flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-zinc-300 hover:border-zinc-500 bg-white hover:bg-zinc-50 transition-colors">
+                        <svg class="w-12 h-12 text-zinc-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                         </svg>
                         <div>
@@ -562,67 +574,87 @@
                 <flux:heading size="xl" class="mb-2">Configure Payment Plan</flux:heading>
                 <flux:subheading class="mb-6">Set up your installment payment schedule</flux:subheading>
 
-                <div class="bg-indigo-50 dark:bg-indigo-900 p-4 rounded-lg mb-6">
-                    <div class="mb-3 pb-3 border-b border-indigo-200">
+                <div class="bg-zinc-50 dark:bg-zinc-900 p-4 rounded-lg mb-6">
+                    <div class="mb-3 pb-3 border-b border-zinc-200">
                         <div class="flex justify-between items-center">
-                            <div class="text-sm text-indigo-700">Invoice Total:</div>
-                            <div class="text-xl font-bold text-indigo-900">${{ number_format($paymentAmount, 2) }}</div>
+                            <div class="text-sm text-zinc-700">Invoice Total:</div>
+                            <div class="text-xl font-bold text-zinc-900">${{ number_format($paymentAmount, 2) }}</div>
                         </div>
                         @if($creditCardFee > 0)
                             <div class="flex justify-between items-center mt-2">
-                                <div class="text-sm text-indigo-700">Credit Card Fee (3%):</div>
-                                <div class="text-lg font-semibold text-indigo-900">+${{ number_format($creditCardFee, 2) }}</div>
+                                <div class="text-sm text-zinc-700">Credit Card Fee ({{ config("payment-fees.credit_card_rate") * 100 }}%):</div>
+                                <div class="text-lg font-semibold text-zinc-900">+${{ number_format($creditCardFee, 2) }}</div>
                             </div>
                         @endif
                         @if($paymentPlanFee > 0)
                             <div class="flex justify-between items-center mt-2">
-                                <div class="text-sm text-indigo-700">
+                                <div class="text-sm text-zinc-700">
                                     Payment Plan Fee (Variable based on terms):
                                 </div>
-                                <div class="text-lg font-semibold text-indigo-900">+${{ number_format($paymentPlanFee, 2) }}</div>
+                                <div class="text-lg font-semibold text-zinc-900">+${{ number_format($paymentPlanFee, 2) }}</div>
                             </div>
                         @endif
                     </div>
                     <div class="flex justify-between items-center">
                         <flux:subheading>Total Amount:</flux:subheading>
-                        <flux:heading size="2xl" class="text-indigo-600">${{ number_format($paymentAmount + $creditCardFee + $paymentPlanFee, 2) }}</flux:heading>
+                        <flux:heading size="2xl" class="text-zinc-800">${{ number_format($paymentAmount + $creditCardFee + $paymentPlanFee, 2) }}</flux:heading>
                     </div>
                 </div>
 
                 <form wire:submit.prevent="confirmPaymentPlan" class="space-y-6">
-                    <div class="grid md:grid-cols-2 gap-6">
-                        <flux:field>
-                            <flux:label>Down Payment (Optional)</flux:label>
-                            <flux:input wire:model.live="downPayment" type="number" step="0.01" min="0" max="{{ $paymentAmount }}" prefix="$" />
-                            <flux:error name="downPayment" />
-                            <flux:description>Amount to pay today (suggested 20%: ${{ number_format($paymentAmount * 0.20, 2) }})</flux:description>
-                        </flux:field>
-
-                        <flux:field>
-                            <flux:label>Number of Installments</flux:label>
-                            <flux:input wire:model.live="planDuration" type="number" min="2" max="12" />
-                            <flux:error name="planDuration" />
-                            <flux:description>Split remaining balance into installments (2-12)</flux:description>
-                        </flux:field>
+                    {{-- Fee Explanation --}}
+                    <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                        <div class="flex items-start gap-3">
+                            <svg class="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <div class="text-sm text-blue-900 dark:text-blue-100">
+                                <p class="font-semibold mb-1">How the payment plan fee is calculated:</p>
+                                <ul class="space-y-1 list-disc list-inside">
+                                    <li><strong>Higher down payment</strong> = Lower fee (75% down gets 75% off the fee!)</li>
+                                    <li><strong>More payments</strong> = Higher fee (longer plans cost more)</li>
+                                    <li>Fee is shown next to each installment option below</li>
+                                </ul>
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="grid md:grid-cols-2 gap-6">
+                    <div class="space-y-6">
+                        <flux:field>
+                            <flux:label>Down Payment: ${{ number_format($downPayment, 2) }} ({{ round(($downPayment / $paymentAmount) * 100) }}%)</flux:label>
+                            <input 
+                                type="range" 
+                                wire:model.live="downPaymentPercent" 
+                                min="25" 
+                                max="75" 
+                                step="5" 
+                                class="w-full h-2 bg-zinc-200 rounded-lg appearance-none cursor-pointer dark:bg-zinc-700"
+                            />
+                            <flux:error name="downPayment" />
+                            <flux:description>Higher down payment = lower fee</flux:description>
+                        </flux:field>
+
                         <flux:field>
                             <flux:label>Payment Frequency</flux:label>
                             <flux:select wire:model.live="planFrequency">
                                 <option value="weekly">Weekly (every 7 days)</option>
                                 <option value="biweekly">Bi-weekly (every 14 days)</option>
                                 <option value="monthly">Monthly (every 30 days)</option>
-                                <option value="quarterly">Quarterly (every 90 days)</option>
-                                <option value="semiannually">Semi-annually (every 180 days)</option>
-                                <option value="annually">Annually (every 365 days)</option>
                             </flux:select>
+                            <flux:description>First payment starts one period from today</flux:description>
                         </flux:field>
 
                         <flux:field>
-                            <flux:label>Plan Start Date (Optional)</flux:label>
-                            <flux:input wire:model.live="planStartDate" type="date" min="{{ now()->format('Y-m-d') }}" />
-                            <flux:description>Leave blank to start payments today</flux:description>
+                            <flux:label>Number of Installments</flux:label>
+                            <flux:select wire:model.live="planDuration">
+                                @foreach($installmentOptions as $option)
+                                    <option value="{{ $option['duration'] }}">
+                                        {{ $option['duration'] }} payments ({{ $option['months'] }} months) - ${{ number_format(round($option['fee'], 2), 2, '.', ',') }} fee
+                                    </option>
+                                @endforeach
+                            </flux:select>
+                            <flux:error name="planDuration" />
+                            <flux:description>More payments = higher fee</flux:description>
                         </flux:field>
                     </div>
 
@@ -639,8 +671,7 @@
                                     <flux:field>
                                         <flux:label>Payment {{ $i + 1 }}</flux:label>
                                         <flux:input
-                                            wire:model.blur="installmentAmounts.{{ $i }}"
-                                            wire:change="updateInstallmentAmount({{ $i }}, $event.target.value)"
+                                            wire:model.live="installmentAmounts.{{ $i }}"
                                             type="number"
                                             step="0.01"
                                             min="0.01"
@@ -649,12 +680,68 @@
                                     </flux:field>
                                 @endfor
                             </div>
-                            <div class="mt-4 p-3 bg-blue-50 dark:bg-blue-900 rounded-lg">
-                                <flux:text class="text-sm">
-                                    Total installments: ${{ number_format(array_sum($installmentAmounts), 2) }} |
-                                    Remaining balance: ${{ number_format($paymentAmount - $downPayment, 2) }}
-                                </flux:text>
+                            
+                            @php
+                                // Round all amounts to 2 decimal places to avoid floating point errors
+                                $totalCustom = round(array_sum(array_map(function($amt) {
+                                    return round((float)$amt, 2);
+                                }, $installmentAmounts)), 2);
+                                
+                                $totalAmount = round($paymentAmount + $paymentPlanFee, 2);
+                                if ($paymentMethod === 'credit_card') {
+                                    $totalAmount = round($totalAmount + $creditCardFee, 2);
+                                }
+                                $remainingBalance = round($totalAmount - $downPayment, 2);
+                                $difference = round($remainingBalance - $totalCustom, 2);
+                                $isValid = abs($difference) < 0.01;
+                            @endphp
+                            
+                            <div class="mt-4 p-4 rounded-lg {{ $isValid ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800' }}">
+                                <div class="space-y-2">
+                                    <div class="flex justify-between items-center">
+                                        <span class="font-medium">Total of Installments:</span>
+                                        <span class="font-bold">${{ number_format($totalCustom, 2) }}</span>
+                                    </div>
+                                    <div class="flex justify-between items-center">
+                                        <span class="font-medium">Required Balance:</span>
+                                        <span class="font-bold">${{ number_format($remainingBalance, 2) }}</span>
+                                    </div>
+                                    <div class="border-t {{ $isValid ? 'border-green-200 dark:border-green-800' : 'border-yellow-200 dark:border-yellow-800' }} pt-2 mt-2">
+                                        @if($isValid)
+                                            <div class="flex items-center gap-2 text-green-700 dark:text-green-400">
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                                </svg>
+                                                <span class="font-semibold">Amounts match perfectly!</span>
+                                            </div>
+                                        @else
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+                                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                                                    </svg>
+                                                    @if($difference > 0)
+                                                        <span class="font-semibold">Need ${{ number_format($difference, 2) }} more</span>
+                                                    @else
+                                                        <span class="font-semibold">${{ number_format(abs($difference), 2) }} too much</span>
+                                                    @endif
+                                                </div>
+                                                <button 
+                                                    type="button"
+                                                    wire:click="rebalanceInstallments"
+                                                    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+                                                >
+                                                    Rebalance
+                                                </button>
+                                            </div>
+                                        @endif
+                                    </div>
+                                </div>
                             </div>
+                            
+                            @if(!$isValid)
+                                <flux:error name="customAmounts" />
+                            @endif
                         </div>
                     @endif
 
@@ -693,7 +780,7 @@
 
                     <div class="flex gap-3">
                         <button wire:click="goBack" type="button" class="px-4 py-2 text-sm font-medium text-zinc-700 hover:text-zinc-900">Back</button>
-                        <button type="submit" class="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg">
+                        <button type="submit" class="flex-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-900 text-white font-medium rounded-lg">
                             Confirm Payment Plan
                         </button>
                     </div>
@@ -708,21 +795,35 @@
             <flux:heading size="xl" class="text-center mb-2">Enter Payment Details</flux:heading>
             <flux:subheading class="text-center mb-8">Securely provide your payment information</flux:subheading>
 
-            <div class="mb-6 bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+            <div class="mb-6 bg-zinc-50 border border-zinc-200 rounded-lg p-4">
                 <div class="flex justify-between items-center">
                     <div>
-                        <div class="text-sm text-indigo-700 font-medium">Payment Amount:</div>
-                        <div class="text-2xl font-bold text-indigo-900">${{ number_format($paymentAmount, 2) }}</div>
+                        <div class="text-sm text-zinc-700 font-medium">Payment Amount:</div>
+                        <div class="text-2xl font-bold text-zinc-900">${{ number_format($paymentAmount, 2) }}</div>
                     </div>
                     @if($paymentMethod === 'credit_card' && $creditCardFee > 0)
                         <div class="text-right">
-                            <div class="text-sm text-indigo-700">Credit Card Fee (3%):</div>
-                            <div class="text-lg font-semibold text-indigo-900">+${{ number_format($creditCardFee, 2) }}</div>
-                            <div class="text-xs text-indigo-600 mt-1">Total: ${{ number_format($paymentAmount + $creditCardFee, 2) }}</div>
+                            <div class="text-sm text-zinc-700">Credit Card Fee ({{ config("payment-fees.credit_card_rate") * 100 }}%):</div>
+                            <div class="text-lg font-semibold text-zinc-900">+${{ number_format($creditCardFee, 2) }}</div>
+                            <div class="text-xs text-zinc-800 mt-1">Total: ${{ number_format($paymentAmount + $creditCardFee, 2) }}</div>
                         </div>
                     @endif
                 </div>
             </div>
+
+            @if($errors->has('payment'))
+                <div class="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
+                    <div class="flex items-start gap-3">
+                        <svg class="w-6 h-6 text-red-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <div class="flex-1">
+                            <h3 class="text-sm font-semibold text-red-800 mb-1">Payment Error</h3>
+                            <p class="text-sm text-red-700">{{ $errors->first('payment') }}</p>
+                        </div>
+                    </div>
+                </div>
+            @endif
 
             <form wire:submit.prevent="confirmPayment" class="space-y-6">
                 @if($paymentMethod === 'credit_card')
@@ -791,7 +892,7 @@
                     <button wire:click="goBack" type="button" class="px-4 py-2 text-sm font-medium text-zinc-700 hover:text-zinc-900">
                         ← Back
                     </button>
-                    <button type="submit" class="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg flex items-center justify-center gap-2" wire:loading.attr="disabled">
+                    <button type="submit" class="flex-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-900 text-white font-medium rounded-lg flex items-center justify-center gap-2" wire:loading.attr="disabled">
                         <span wire:loading.remove>
                             Process Payment (${{ number_format($paymentMethod === 'credit_card' ? $paymentAmount + $creditCardFee : $paymentAmount, 2) }})
                         </span>
@@ -815,7 +916,7 @@
             <flux:subheading class="text-center mb-8">Review terms and provide payment method for your installment plan</flux:subheading>
 
             {{-- Payment Plan Summary --}}
-            <div class="bg-indigo-50 dark:bg-indigo-900 p-4 rounded-lg mb-6">
+            <div class="bg-zinc-50 dark:bg-zinc-900 p-4 rounded-lg mb-6">
                 <flux:heading size="lg" class="mb-3">Payment Plan Summary</flux:heading>
                 <div class="grid md:grid-cols-2 gap-4 text-sm">
                     <div>
@@ -836,7 +937,7 @@
                     @endif
                     <div>
                         <flux:subheading>Total Obligation:</flux:subheading>
-                        <flux:text class="font-bold text-indigo-600">${{ number_format($paymentAmount + $creditCardFee + $paymentPlanFee, 2) }}</flux:text>
+                        <flux:text class="font-bold text-zinc-800">${{ number_format($paymentAmount + $creditCardFee + $paymentPlanFee, 2) }}</flux:text>
                     </div>
                     <div>
                         <flux:subheading>Down Payment:</flux:subheading>
@@ -870,7 +971,7 @@
                         </ul>
 
                         <p class="mb-3"><strong>Authorization:</strong></p>
-                        <p>By agreeing to these terms, you authorize [Company Name] to charge your payment method for all scheduled payments. You understand that this authorization will remain in effect until the payment plan is completed or cancelled.</p>
+                        <p>By agreeing to these terms, you authorize {{ config('branding.company_name') }} to charge your payment method for all scheduled payments. You understand that this authorization will remain in effect until the payment plan is completed or cancelled.</p>
                     </div>
 
                     <flux:field>
@@ -888,9 +989,9 @@
                         <button
                             wire:click="$set('paymentMethod', 'credit_card')"
                             type="button"
-                            class="h-32 flex flex-col items-center justify-center gap-3 rounded-lg border-2 {{ $paymentMethod === 'credit_card' ? 'border-indigo-500 bg-indigo-50' : 'border-zinc-300 hover:border-indigo-500 bg-white hover:bg-zinc-50' }} transition-colors"
+                            class="h-32 flex flex-col items-center justify-center gap-3 rounded-lg border-2 {{ $paymentMethod === 'credit_card' ? 'border-zinc-500 bg-zinc-50' : 'border-zinc-300 hover:border-zinc-500 bg-white hover:bg-zinc-50' }} transition-colors"
                         >
-                            <svg class="w-10 h-10 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg class="w-10 h-10 text-zinc-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
                             </svg>
                             <div class="text-center">
@@ -902,9 +1003,9 @@
                         <button
                             wire:click="$set('paymentMethod', 'ach')"
                             type="button"
-                            class="h-32 flex flex-col items-center justify-center gap-3 rounded-lg border-2 {{ $paymentMethod === 'ach' ? 'border-indigo-500 bg-indigo-50' : 'border-zinc-300 hover:border-indigo-500 bg-white hover:bg-zinc-50' }} transition-colors"
+                            class="h-32 flex flex-col items-center justify-center gap-3 rounded-lg border-2 {{ $paymentMethod === 'ach' ? 'border-zinc-500 bg-zinc-50' : 'border-zinc-300 hover:border-zinc-500 bg-white hover:bg-zinc-50' }} transition-colors"
                         >
-                            <svg class="w-10 h-10 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg class="w-10 h-10 text-zinc-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"></path>
                             </svg>
                             <div class="text-center">
@@ -974,7 +1075,7 @@
                         </svg>
                         Edit Plan
                     </button>
-                    <button type="submit" class="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg">
+                    <button type="submit" class="flex-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-900 text-white font-medium rounded-lg">
                         Authorize & Continue
                     </button>
                 </div>
@@ -1045,7 +1146,7 @@
                     @endif
                     <div class="flex justify-between py-3 border-b">
                         <flux:subheading>Total Obligation:</flux:subheading>
-                        <flux:text class="font-bold text-indigo-600">${{ number_format($paymentAmount + $creditCardFee + $paymentPlanFee, 2) }}</flux:text>
+                        <flux:text class="font-bold text-zinc-800">${{ number_format($paymentAmount + $creditCardFee + $paymentPlanFee, 2) }}</flux:text>
                     </div>
                     @if($downPayment > 0)
                         <div class="flex justify-between py-3 border-b">
@@ -1112,12 +1213,12 @@
                     </div>
                     @if($creditCardFee > 0)
                         <div class="flex justify-between py-3 border-b">
-                            <flux:subheading>Credit Card Fee (3%):</flux:subheading>
+                            <flux:subheading>Credit Card Fee ({{ config("payment-fees.credit_card_rate") * 100 }}%):</flux:subheading>
                             <flux:text>${{ number_format($creditCardFee, 2) }}</flux:text>
                         </div>
-                        <div class="flex justify-between py-3 border-b bg-indigo-50">
+                        <div class="flex justify-between py-3 border-b bg-zinc-50">
                             <flux:heading size="lg">Total Amount:</flux:heading>
-                            <flux:heading size="lg" class="text-indigo-600">${{ number_format($paymentAmount + $creditCardFee, 2) }}</flux:heading>
+                            <flux:heading size="lg" class="text-zinc-800">${{ number_format($paymentAmount + $creditCardFee, 2) }}</flux:heading>
                         </div>
                     @endif
                     <div class="flex justify-between py-3 border-b">
@@ -1171,17 +1272,17 @@
                                     </svg>
                                     Edit Payment Plan
                                 </button>
-                                <button wire:click="startOver" type="button" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg">
+                                <button wire:click="startOver" type="button" class="px-4 py-2 bg-zinc-800 hover:bg-zinc-900 text-white font-medium rounded-lg">
                                     Set Up New Plan
                                 </button>
                             </div>
                             <div class="text-sm text-zinc-600 mt-3">
-                                <a href="#" class="text-indigo-600 hover:text-indigo-700 underline mr-4">View in Account Portal</a>
-                                <a href="#" class="text-indigo-600 hover:text-indigo-700 underline">Contact Support</a>
+                                <a href="#" class="text-zinc-800 hover:text-zinc-700 underline mr-4">View in Account Portal</a>
+                                <a href="#" class="text-zinc-800 hover:text-zinc-700 underline">Contact Support</a>
                             </div>
                         </div>
                     @else
-                        <button wire:click="startOver" type="button" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-lg rounded-lg">
+                        <button wire:click="startOver" type="button" class="px-6 py-3 bg-zinc-800 hover:bg-zinc-900 text-white font-medium text-lg rounded-lg">
                             Make Another Payment
                         </button>
                     @endif

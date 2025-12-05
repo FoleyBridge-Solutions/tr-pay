@@ -7,79 +7,84 @@ use Carbon\Carbon;
 class PaymentPlanCalculator
 {
     /**
-     * Calculate payment plan fee based on risk and duration.
+     * Calculate payment plan fee based on total amount, duration, and down payment.
      * 
      * @param float $paymentAmount Total invoice amount
      * @param float $downPayment Down payment amount
      * @param int $duration Number of installments
      * @param string $frequency Payment frequency
-     * @return array Fee details ['fee_amount' => float, 'rate_used' => float, 'risk_tier' => int, 'duration_tier' => string]
+     * @return array Fee details ['fee_amount' => float, 'months' => int, 'duration_multiplier' => float, 'down_payment_multiplier' => float, 'down_payment_percent' => float]
      */
     public function calculateFee(float $paymentAmount, float $downPayment, int $duration, string $frequency): array
     {
-        // 1. Calculate Principal Financed
-        $principalFinanced = $paymentAmount - $downPayment;
+        $feeRanges = config('payment-fees.payment_plan_fees');
         
-        // If down payment covers everything, no fee
-        if ($principalFinanced <= 0) {
-            return [
-                'fee_amount' => 0.00,
-                'rate_used' => 0.00,
-                'risk_tier' => 0,
-                'duration_tier' => 'none',
-            ];
+        $baseFee = 0.00;
+        
+        // Find the base fee based on payment amount
+        foreach ($feeRanges as $range) {
+            if ($paymentAmount >= $range['min'] && $paymentAmount < $range['max']) {
+                $baseFee = $range['fee'];
+                break;
+            }
         }
 
-        // 2. Calculate Down Payment Percentage
-        $downPaymentPercent = ($paymentAmount > 0) ? ($downPayment / $paymentAmount) * 100 : 0;
-
-        // 3. Determine Risk Tier (Column)
-        // Tier 1 (High Down Pmt): > 30%
-        // Tier 2 (Std Down Pmt): 15-30%
-        // Tier 3 (Low Down Pmt): < 15%
-        $riskTier = 3; // Default to high risk
-        if ($downPaymentPercent > 30) {
-            $riskTier = 1;
-        } elseif ($downPaymentPercent >= 15) {
-            $riskTier = 2;
-        }
-
-        // 4. Determine Duration Tier (Row) based on TOTAL DAYS
-        $daysPerInstallment = $this->getDaysPerInstallment($frequency);
-        $totalDays = $duration * $daysPerInstallment;
-
-        // Short: < 150 days (approx 5 months)
-        // Medium: 150 - 240 days (approx 5-8 months)
-        // Long: > 240 days (approx 8+ months)
-        $durationTier = 'short';
-        if ($totalDays >= 150 && $totalDays <= 240) {
-            $durationTier = 'medium';
-        } elseif ($totalDays > 240) {
-            $durationTier = 'long';
-        }
-
-        // 5. Fetch Rate from Matrix
-        // [Risk Tier][Duration Tier]
-        $rates = [
-            1 => ['short' => 0.020, 'medium' => 0.035, 'long' => 0.050], // High Down Payment
-            2 => ['short' => 0.030, 'medium' => 0.050, 'long' => 0.070], // Standard Down Payment
-            3 => ['short' => 0.045, 'medium' => 0.070, 'long' => 0.090], // Low Down Payment
-        ];
-
-        $rate = $rates[$riskTier][$durationTier];
-
-        // 6. Calculate Fee
-        // Fee = $15.00 Setup + (Principal * Rate)
-        $setupFee = 15.00;
-        $variableFee = $principalFinanced * $rate;
-        $totalFee = round($setupFee + $variableFee, 2);
+        // Calculate total duration in months
+        $months = $this->calculateMonthsFromDuration($duration, $frequency);
+        
+        // Determine duration multiplier
+        $durationMultiplier = $this->getDurationMultiplier($months);
+        
+        // Calculate down payment percentage
+        $downPaymentPercent = $paymentAmount > 0 ? ($downPayment / $paymentAmount) : 0;
+        
+        // Down payment multiplier: 1 - (down payment %)
+        // e.g., 25% down = 0.75x, 50% down = 0.50x, 75% down = 0.25x
+        $downPaymentMultiplier = 1 - $downPaymentPercent;
+        
+        // Apply both multipliers to base fee
+        $finalFee = round($baseFee * $durationMultiplier * $downPaymentMultiplier, 2);
 
         return [
-            'fee_amount' => $totalFee,
-            'rate_used' => $rate,
-            'risk_tier' => $riskTier,
-            'duration_tier' => $durationTier,
+            'fee_amount' => $finalFee,
+            'months' => $months,
+            'duration_multiplier' => $durationMultiplier,
+            'down_payment_multiplier' => $downPaymentMultiplier,
+            'down_payment_percent' => round($downPaymentPercent * 100, 2),
         ];
+    }
+    
+    /**
+     * Calculate approximate months from duration and frequency.
+     */
+    public function calculateMonthsFromDuration(int $duration, string $frequency): int
+    {
+        $daysPerInstallment = $this->getDaysPerInstallment($frequency);
+        $totalDays = $duration * $daysPerInstallment;
+        
+        // Convert days to months (using 30 days per month)
+        return (int) round($totalDays / 30);
+    }
+    
+    /**
+     * Get duration multiplier based on total months.
+     * 0-3 months: 1.0
+     * 4-7 months: 1.75
+     * 8-11 months: 2.5
+     * Maximum allowed plan duration is 11 months
+     */
+    public function getDurationMultiplier(int $months): float
+    {
+        if ($months <= 3) {
+            return 1.0;
+        } elseif ($months <= 7) {
+            return 1.75;
+        } elseif ($months <= 11) {
+            return 2.5;
+        } else {
+            // Plans over 11 months are not allowed, but return 0 to indicate invalid
+            return 0;
+        }
     }
 
     /**
@@ -167,7 +172,8 @@ class PaymentPlanCalculator
 
     /**
      * Get the maximum allowed installments for a given frequency.
-     * Assumes a maximum term of approx 12 months.
+     * Note: Only weekly, biweekly, and monthly are available to users.
+     * Maximum term is 11 months.
      */
     public function getMaxInstallments(string $frequency): int
     {
