@@ -10,8 +10,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | Configure the fees and rates for various payment methods and
-    | payment plan options. These values affect payment calculations
-    | throughout the application.
+    | payment plan options.
     |
     */
 
@@ -29,21 +28,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Payment Plan Fees (Fixed Dollar Amounts)
+    | Payment Plan Fees (Simple Flat Fees)
     |--------------------------------------------------------------------------
     |
-    | Fixed fees based on total payment amount ranges.
-    | Fee is applied based on the invoice total.
+    | Flat fees based on plan duration. Simple and straightforward:
+    | - 3 months: $150
+    | - 6 months: $300
+    | - 9 months: $450
     |
     */
 
     'payment_plan_fees' => [
-        ['min' => 0,     'max' => 500,    'fee' => 25.00],
-        ['min' => 500,   'max' => 1000,   'fee' => 50.00],
-        ['min' => 1000,  'max' => 2500,   'fee' => 75.00],
-        ['min' => 2500,  'max' => 5000,   'fee' => 125.00],
-        ['min' => 5000,  'max' => 10000,  'fee' => 200.00],
-        ['min' => 10000, 'max' => PHP_FLOAT_MAX, 'fee' => 350.00],
+        3 => 150.00,
+        6 => 300.00,
+        9 => 450.00,
     ],
 
 ];

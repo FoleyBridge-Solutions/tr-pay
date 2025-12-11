@@ -9,15 +9,18 @@ use Livewire\Attributes\Layout;
 use App\Repositories\PaymentRepository;
 use App\Services\PaymentService;
 use App\Services\PaymentPlanCalculator;
-    use App\Models\Customer;
-    use App\Models\ProjectAcceptance;
-    use Illuminate\Support\Facades\Log;
+use App\Services\EngagementAcceptanceService;
+use App\Livewire\PaymentFlow\Steps;
+use App\Livewire\PaymentFlow\Navigator;
+use App\Models\ProjectAcceptance;
+use Illuminate\Support\Facades\Log;
 
-    #[Layout('layouts.app')]
-    class PaymentFlow extends Component
-    {
-        // Step tracking
-        public $currentStep = 1;
+#[Layout('layouts.app')]
+class PaymentFlow extends Component
+{
+        // Step tracking - now using named steps
+        public string $currentStep = 'account-type'; // Steps::ACCOUNT_TYPE
+        public array $stepHistory = []; // Stack of previous steps for back navigation
         
         // Step 1: Account Type
         public $accountType = null; // 'business' or 'personal'
@@ -26,6 +29,7 @@ use App\Services\PaymentPlanCalculator;
         public $last4 = '';
         public $lastName = '';
         public $businessName = '';
+        public $loadingInvoices = false; // For skeleton loading state
         
         // Client data
         public $clientInfo = null;
@@ -58,18 +62,12 @@ use App\Services\PaymentPlanCalculator;
     public $paymentMethod = null; // 'credit_card', 'ach', 'check', 'payment_plan'
     public $creditCardFee = 0;
     
-    // Payment Plan
+    // Payment Plan (Simplified: 3, 6, or 9 months only)
     public $isPaymentPlan = false;
-    public $planFrequency = 'monthly'; // 'weekly', 'biweekly', 'monthly', 'quarterly', 'semiannually', 'annually'
-    public $planDuration = 3; // Number of payments
-    public $downPayment = 0;
-    public $downPaymentPercent = 50; // Down payment percentage (25-75%)
-    public $planStartDate = null; // Custom start date for payments
-    public $customAmounts = false; // Allow custom amounts per installment
-    public $installmentAmounts = []; // Array of custom amounts
+    public $planDuration = 3; // Number of months (3, 6, or 9)
     public $paymentSchedule = [];
-    public $paymentPlanFee = 0; // Fee for payment plans
-    public $installmentOptions = []; // Available installment options with fees
+    public $paymentPlanFee = 0; // Fee for payment plans ($150, $300, or $450)
+    public $availablePlans = []; // Available plan options with fees
     
     // Step 5: Payment Plan Authorization (for payment plans only)
     public $agreeToTerms = false;
@@ -121,6 +119,16 @@ use App\Services\PaymentPlanCalculator;
         $this->cardExpiry = $expiry;
     }
 
+    /**
+     * Format CVV as user types (numbers only)
+     */
+    public function updatedCardCvv()
+    {
+        // Remove all non-digits and limit to 4 characters
+        $cvv = preg_replace('/\D/', '', $this->cardCvv);
+        $this->cardCvv = substr($cvv, 0, 4);
+    }
+
     public function updatedPaymentMethod($value)
     {
         if ($value === 'credit_card') {
@@ -152,13 +160,22 @@ use App\Services\PaymentPlanCalculator;
     }
 
     /**
+     * Navigate to a step (with history tracking)
+     */
+    protected function goToStep(string $step): void
+    {
+        $this->stepHistory[] = $this->currentStep;
+        $this->currentStep = $step;
+        $this->resetValidation();
+    }
+
+    /**
      * Step 1: Select account type
      */
     public function selectAccountType($type)
     {
         $this->accountType = $type;
-        $this->currentStep = 2;
-        $this->resetValidation();
+        $this->goToStep(Steps::VERIFY_ACCOUNT);
     }
 
     /**
@@ -201,17 +218,38 @@ use App\Services\PaymentPlanCalculator;
 
         $this->clientInfo = $client;
 
-        // NEW: Check for pending projects BEFORE loading invoices
-        $this->checkForPendingProjects();
+        // Dispatch success toast
+        $this->dispatch('toast', 
+            text: 'Successfully verified!',
+            type: 'success'
+        );
+
+        // Set loading state for skeleton
+        $this->loadingInvoices = true;
+
+        // TEMPORARILY DISABLED: Check for pending projects BEFORE loading invoices
+        // $this->checkForPendingProjects();
+        // 
+        // if ($this->hasProjectsToAccept) {
+        //     // Go to project acceptance step
+        //     $this->goToStep(Steps::PROJECT_ACCEPTANCE);
+        //     $this->loadingInvoices = false;
+        // } else {
+        //     // Show loading skeleton - onSkeletonComplete will load invoices
+        //     $this->goToStep(Steps::LOADING_INVOICES);
+        // }
         
-        if ($this->hasProjectsToAccept) {
-            // Go to project acceptance step
-            $this->currentStep = 3; // Renumber: 3 = Project Acceptance
-        } else {
-            // No projects to accept, load invoices normally
-            $this->loadClientInvoices();
-            $this->currentStep = 4; // Renumber: 4 = Invoice Selection
-        }
+        // Skip project check, go directly to loading invoices
+        $this->goToStep(Steps::LOADING_INVOICES);
+    }
+    
+    /**
+     * Load invoices (called from frontend after skeleton is shown)
+     */
+    public function loadInvoicesData()
+    {
+        $this->loadClientInvoices();
+        $this->loadingInvoices = false;
     }
 
     /**
@@ -237,6 +275,7 @@ use App\Services\PaymentPlanCalculator;
                 return !isset($invoice['is_placeholder']) || !$invoice['is_placeholder'];
             })
             ->pluck('invoice_number')
+            ->map(fn($num) => (string)$num)
             ->toArray();
         $this->selectAll = true; // Set toggle to match pre-selected state
         
@@ -303,9 +342,9 @@ use App\Services\PaymentPlanCalculator;
             $this->currentProjectIndex = count($this->pendingProjects) - 1;
             $this->loadClientInvoices();
             $this->addAcceptedProjectsAsInvoices();
-            $this->currentStep = 4; // Invoice Selection
+            $this->goToStep(Steps::INVOICE_SELECTION);
         }
-        // else: Stay on step 3 to show next project
+        // else: Stay on project acceptance to show next project
     }
 
     /**
@@ -329,7 +368,7 @@ use App\Services\PaymentPlanCalculator;
             // All projects reviewed, proceed to invoices
             $this->loadClientInvoices();
             $this->addAcceptedProjectsAsInvoices();
-            $this->currentStep = 4;
+            $this->goToStep(Steps::INVOICE_SELECTION);
         }
     }
 
@@ -432,23 +471,26 @@ use App\Services\PaymentPlanCalculator;
     }
     
     /**
-     * Toggle invoice selection
+     * Toggle individual invoice selection
      */
     public function toggleInvoice($invoiceNumber)
     {
+        // Ensure string type for consistency
+        $invoiceNumber = (string)$invoiceNumber;
+        
         // Don't allow selecting placeholder invoices (clients with no actual invoices)
         $invoice = collect($this->openInvoices)->firstWhere('invoice_number', $invoiceNumber);
         if ($invoice && isset($invoice['is_placeholder']) && $invoice['is_placeholder']) {
             return; // Don't select placeholder invoices
         }
 
-        if (in_array($invoiceNumber, $this->selectedInvoices)) {
-            $this->selectedInvoices = array_diff($this->selectedInvoices, [$invoiceNumber]);
+        if (in_array($invoiceNumber, $this->selectedInvoices, true)) {
+            $this->selectedInvoices = array_values(array_diff($this->selectedInvoices, [$invoiceNumber]));
         } else {
             $this->selectedInvoices[] = $invoiceNumber;
         }
 
-        $this->calculatePaymentAmount();
+        $this->updatedSelectedInvoices();
     }
     
     /**
@@ -468,12 +510,14 @@ use App\Services\PaymentPlanCalculator;
             $this->selectedInvoices = [];
             $this->selectAll = false;
         } else {
-            // Select all non-placeholder invoices
-            $this->selectedInvoices = $selectableInvoices->pluck('invoice_number')->toArray();
+            // Select all non-placeholder invoices (cast to string)
+            $this->selectedInvoices = $selectableInvoices->pluck('invoice_number')
+                ->map(fn($num) => (string)$num)
+                ->toArray();
             $this->selectAll = true;
         }
         
-        $this->calculatePaymentAmount();
+        $this->updatedSelectedInvoices();
     }
 
     /**
@@ -511,7 +555,10 @@ use App\Services\PaymentPlanCalculator;
                 return !isset($invoice['is_placeholder']) || !$invoice['is_placeholder'];
             });
             
-            $clientInvoiceNumbers = $selectableInvoices->pluck('invoice_number')->toArray();
+            // Cast invoice numbers to strings for consistent comparison
+            $clientInvoiceNumbers = $selectableInvoices->pluck('invoice_number')
+                ->map(fn($num) => (string)$num)
+                ->toArray();
             
             if (!empty($clientInvoiceNumbers)) {
                 $selectedCount = count(array_intersect($this->selectedInvoices, $clientInvoiceNumbers));
@@ -538,6 +585,50 @@ use App\Services\PaymentPlanCalculator;
     }
 
     /**
+     * Toggle all invoices for a specific client
+     */
+    public function toggleClientSelectAll($clientKey)
+    {
+        // Get real client name from map
+        $clientName = $this->clientNameMap[$clientKey] ?? null;
+        
+        if (!$clientName) {
+            // Key not found, rebuild the map and try again
+            $this->updateClientToggleStates();
+            $clientName = $this->clientNameMap[$clientKey] ?? null;
+            
+            if (!$clientName) {
+                return; // Still invalid, abort
+            }
+        }
+        
+        // Get all selectable invoices for this client (cast to strings)
+        $clientInvoices = collect($this->openInvoices)
+            ->where('client_name', $clientName)
+            ->where(function($invoice) {
+                return !isset($invoice['is_placeholder']) || !$invoice['is_placeholder'];
+            });
+
+        $clientInvoiceNumbers = $clientInvoices->pluck('invoice_number')
+            ->map(fn($num) => (string)$num)
+            ->toArray();
+        
+        // Check current state
+        $allSelected = !empty($clientInvoiceNumbers) && 
+                      count(array_intersect($this->selectedInvoices, $clientInvoiceNumbers)) === count($clientInvoiceNumbers);
+        
+        if ($allSelected) {
+            // Deselect all client invoices
+            $this->selectedInvoices = array_values(array_diff($this->selectedInvoices, $clientInvoiceNumbers));
+        } else {
+            // Select all client invoices
+            $this->selectedInvoices = array_values(array_unique(array_merge($this->selectedInvoices, $clientInvoiceNumbers)));
+        }
+
+        $this->updatedSelectedInvoices();
+    }
+    
+    /**
      * Update per-client toggle states when changed via wire:model
      * Livewire calls this automatically when clientSelectAll.{sanitizedKey} changes
      */
@@ -556,14 +647,16 @@ use App\Services\PaymentPlanCalculator;
             }
         }
         
-        // Get all selectable invoices for this client
+        // Get all selectable invoices for this client (cast to string)
         $clientInvoices = collect($this->openInvoices)
             ->where('client_name', $clientName)
             ->where(function($invoice) {
                 return !isset($invoice['is_placeholder']) || !$invoice['is_placeholder'];
             });
 
-        $clientInvoiceNumbers = $clientInvoices->pluck('invoice_number')->toArray();
+        $clientInvoiceNumbers = $clientInvoices->pluck('invoice_number')
+            ->map(fn($num) => (string)$num)
+            ->toArray();
         
         if ($value) {
             // Select all client invoices
@@ -573,7 +666,7 @@ use App\Services\PaymentPlanCalculator;
             $this->selectedInvoices = array_values(array_diff($this->selectedInvoices, $clientInvoiceNumbers));
         }
 
-        $this->calculatePaymentAmount();
+        $this->updatedSelectedInvoices();
     }
     
     /**
@@ -616,11 +709,11 @@ use App\Services\PaymentPlanCalculator;
             'paymentAmount.max' => 'Payment amount cannot exceed the selected invoices total ($' . number_format($selectedTotal, 2) . ')',
         ]);
 
-        $this->currentStep = 5;
+        $this->goToStep(Steps::PAYMENT_METHOD);
     }
 
     /**
-     * Step 4: Payment Method
+     * Payment Method Selection
      */
     public function selectPaymentMethod($method)
     {
@@ -633,61 +726,42 @@ use App\Services\PaymentPlanCalculator;
             $this->creditCardFee = 0;
         }
 
-        // If payment plan, stay on step 4 to show configuration
+        // If payment plan, stay on payment method step to show plan selection
         if ($method === 'payment_plan') {
             $this->isPaymentPlan = true;
-            // Initialize down payment to 50% (middle of 25-75% range)
-            $this->downPaymentPercent = 50;
-            $this->downPayment = round($this->paymentAmount * 0.50, 2);
-            // Set start date to one frequency period from today
-            $this->setStartDateByFrequency();
-            // Generate installment options with fees
-            $this->generateInstallmentOptions();
-            // Calculate payment plan fee based on terms
+            // Generate available plan options (3, 6, 9 months)
+            $this->availablePlans = $this->planCalculator->getAvailablePlans($this->paymentAmount);
+            // Default to 3 month plan
+            $this->planDuration = 3;
             $this->calculatePaymentPlanFee();
             $this->calculatePaymentSchedule();
-            // Stay on step 4 to show plan configuration
+            // Stay on payment method step to show plan selection
         } else {
             $this->isPaymentPlan = false;
             $this->paymentPlanFee = 0;
 
-            // Proceed to step 5 to collect payment details
-            $this->currentStep = 6;
+            // Proceed to payment details
+            $this->goToStep(Steps::PAYMENT_DETAILS);
         }
     }
     
     /**
-     * Generate installment options with fees
-     * Maximum plan duration is 11 months
+     * Select a payment plan duration (3, 6, or 9 months)
      */
-    public function generateInstallmentOptions()
+    public function selectPlanDuration(int $months)
     {
-        $this->installmentOptions = [];
-        
-        // Generate options from 2 to 12 installments, but only include those <= 11 months
-        for ($i = 2; $i <= 12; $i++) {
-            $result = $this->planCalculator->calculateFee(
-                $this->paymentAmount,
-                $this->downPayment,
-                $i,
-                $this->planFrequency
-            );
-            
-            // Only include options that don't exceed 11 months
-            if ($result['months'] <= 11) {
-                $this->installmentOptions[] = [
-                    'duration' => $i,
-                    'fee' => round($result['fee_amount'], 2),
-                    'months' => $result['months'],
-                    'duration_multiplier' => $result['duration_multiplier'],
-                    'down_payment_multiplier' => $result['down_payment_multiplier'],
-                ];
-            }
+        if (!$this->planCalculator->isValidDuration($months)) {
+            $this->addError('planDuration', 'Please select a valid plan duration.');
+            return;
         }
+        
+        $this->planDuration = $months;
+        $this->calculatePaymentPlanFee();
+        $this->calculatePaymentSchedule();
     }
 
     /**
-     * Calculate payment plan fee using the Calculator Service
+     * Calculate payment plan fee (simple flat fee based on duration)
      */
     public function calculatePaymentPlanFee()
     {
@@ -696,14 +770,7 @@ use App\Services\PaymentPlanCalculator;
             return;
         }
 
-        $result = $this->planCalculator->calculateFee(
-            $this->paymentAmount,
-            $this->downPayment,
-            $this->planDuration,
-            $this->planFrequency
-        );
-
-        $this->paymentPlanFee = round($result['fee_amount'], 2);
+        $this->paymentPlanFee = $this->planCalculator->getFee($this->planDuration);
         
         // Update Credit Card Fee to include the plan fee if paying by card
         if ($this->paymentMethod === 'credit_card') {
@@ -713,62 +780,22 @@ use App\Services\PaymentPlanCalculator;
     }
 
     /**
-     * Confirm payment plan and proceed
+     * Confirm payment plan and proceed to payment details
      */
     public function confirmPaymentPlan()
     {
-        // Calculate min and max down payment based on 25-75% requirement
-        $minDownPayment = round($this->paymentAmount * 0.25, 2);
-        $maxDownPayment = round($this->paymentAmount * 0.75, 2);
-
-        // Validate payment plan
-        $this->validate([
-            'downPayment' => "required|numeric|min:$minDownPayment|max:$maxDownPayment",
-            'downPaymentPercent' => 'required|integer|min:25|max:75',
-            'planDuration' => "required|integer|min:2|max:12",
-        ], [
-            'downPayment.required' => 'Down payment is required',
-            'downPayment.min' => 'Down payment must be at least 25% ($' . number_format($minDownPayment, 2) . ')',
-            'downPayment.max' => 'Down payment cannot exceed 75% ($' . number_format($maxDownPayment, 2) . ')',
-            'downPaymentPercent.min' => 'Down payment must be at least 25%',
-            'downPaymentPercent.max' => 'Down payment cannot exceed 75%',
-            'planDuration.min' => 'Payment plan must have at least 2 installments',
-            'planDuration.max' => 'Payment plan cannot exceed 12 installments',
-        ]);
-        
-        // Validate that the plan does not exceed 11 months
-        $planMonths = $this->planCalculator->calculateMonthsFromDuration($this->planDuration, $this->planFrequency);
-        if ($planMonths > 11) {
-            $this->addError('planDuration', 'Payment plans cannot exceed 11 months. Please choose fewer installments or a different frequency.');
+        // Validate plan duration is valid (3, 6, or 9 months)
+        if (!$this->planCalculator->isValidDuration($this->planDuration)) {
+            $this->addError('planDuration', 'Please select a valid payment plan (3, 6, or 9 months).');
             return;
-        }
-
-        // Validate custom amounts if enabled
-        if ($this->customAmounts) {
-            // Round all amounts to 2 decimal places to avoid floating point errors
-            $totalCustom = round(array_sum(array_map(function($amt) {
-                return round((float)$amt, 2);
-            }, $this->installmentAmounts)), 2);
-            
-            // Calculate total including fee
-            $totalAmount = round($this->paymentAmount + $this->paymentPlanFee, 2);
-            if ($this->paymentMethod === 'credit_card') {
-                $totalAmount = round($totalAmount + $this->creditCardFee, 2);
-            }
-            $remainingBalance = round($totalAmount - $this->downPayment, 2);
-
-            if (abs($totalCustom - $remainingBalance) > 0.01) {
-                $this->addError('customAmounts', 'Custom installment amounts must total to the remaining balance: $' . number_format($remainingBalance, 2));
-                return;
-            }
         }
         
         $this->calculatePaymentSchedule();
-        $this->currentStep = 6; // Go to authorization step
+        $this->goToStep(Steps::PAYMENT_PLAN_AUTH);
     }
     
     /**
-     * Calculate payment schedule using Calculator Service
+     * Calculate payment schedule (simple monthly payments)
      */
     public function calculatePaymentSchedule()
     {
@@ -782,132 +809,21 @@ use App\Services\PaymentPlanCalculator;
 
         $this->paymentSchedule = $this->planCalculator->calculateSchedule(
             $totalAmount,
-            $this->downPayment,
+            0, // No down payment
             $this->planDuration,
-            $this->planFrequency,
-            $this->planStartDate,
-            $this->customAmounts ? $this->installmentAmounts : []
+            'monthly',
+            null,
+            []
         );
     }
-    
-    /**
-     * Update payment schedule when plan settings change
-     */
-    public function updatedPlanFrequency()
-    {
-        // Reset duration to valid range if needed
-        $max = $this->planCalculator->getMaxInstallments($this->planFrequency);
-        if ($this->planDuration > $max) {
-            $this->planDuration = $max;
-        }
-        
-        // Update start date based on new frequency
-        $this->setStartDateByFrequency();
-        
-        $this->generateInstallmentOptions();
-        $this->calculatePaymentPlanFee();
-        $this->calculatePaymentSchedule();
-    }
-    
-    /**
-     * Set plan start date to one frequency period from today
-     */
-    private function setStartDateByFrequency()
-    {
-        $daysToAdd = $this->planCalculator->getDaysPerInstallment($this->planFrequency);
-        $this->planStartDate = now()->addDays($daysToAdd)->format('Y-m-d');
-    }
 
+    /**
+     * Update when plan duration changes
+     */
     public function updatedPlanDuration()
     {
         $this->calculatePaymentPlanFee();
         $this->calculatePaymentSchedule();
-    }
-    
-    public function updatedDownPayment()
-    {
-        $this->generateInstallmentOptions();
-        $this->calculatePaymentPlanFee();
-        $this->calculatePaymentSchedule();
-    }
-
-    public function updatedDownPaymentPercent($value)
-    {
-        // Update down payment dollar amount based on percentage
-        $this->downPayment = round($this->paymentAmount * ($value / 100), 2);
-        $this->generateInstallmentOptions();
-        $this->calculatePaymentPlanFee();
-        $this->calculatePaymentSchedule();
-    }
-
-    /**
-     * When customAmounts checkbox is toggled
-     */
-    public function updatedCustomAmounts($value)
-    {
-        if ($value) {
-            $this->initializeCustomAmounts();
-        } else {
-            $this->installmentAmounts = [];
-        }
-        $this->calculatePaymentSchedule();
-    }
-
-    /**
-     * Toggle custom amounts mode
-     */
-    public function toggleCustomAmounts()
-    {
-        $this->customAmounts = !$this->customAmounts;
-        if ($this->customAmounts) {
-            $this->initializeCustomAmounts();
-        } else {
-            $this->installmentAmounts = [];
-        }
-        $this->calculatePaymentSchedule();
-    }
-
-    /**
-     * Initialize custom amounts array with equal installments
-     */
-    private function initializeCustomAmounts()
-    {
-        // Include payment plan fee in total
-        $totalAmount = $this->paymentAmount + $this->paymentPlanFee;
-        
-        // If paying by credit card, include the fee
-        if ($this->paymentMethod === 'credit_card') {
-            $totalAmount += $this->creditCardFee;
-        }
-
-        $remainingBalance = $totalAmount - $this->downPayment;
-
-        $this->installmentAmounts = $this->planCalculator->getEqualInstallments(
-            $remainingBalance,
-            $this->planDuration
-        );
-    }
-
-    /**
-     * Update custom installment amount
-     */
-    public function updateInstallmentAmount($index, $amount)
-    {
-        if (isset($this->installmentAmounts[$index])) {
-            $this->installmentAmounts[$index] = round((float)$amount, 2);
-            $this->calculatePaymentSchedule();
-        }
-    }
-    
-    /**
-     * Handle updates to installmentAmounts array (called by wire:model.live)
-     */
-    public function updatedInstallmentAmounts($value, $index)
-    {
-        // Round to 2 decimal places to avoid floating point issues
-        if (isset($this->installmentAmounts[$index])) {
-            $this->installmentAmounts[$index] = round((float)$this->installmentAmounts[$index], 2);
-        }
     }
 
     /**
@@ -977,28 +893,29 @@ use App\Services\PaymentPlanCalculator;
         }
 
         // Proceed to confirmation
-        $this->currentStep = 7;
+        $this->goToStep(Steps::CONFIRMATION);
         $this->transactionId = 'mpc_plan_' . uniqid();
     }
 
     /**
-     * Go back to previous step
+     * Go back to previous step using history stack
      */
     public function goBack()
     {
-        if ($this->currentStep > 1) {
-            $this->currentStep--;
+        if (!empty($this->stepHistory)) {
+            $previousStep = array_pop($this->stepHistory);
+            $this->currentStep = $previousStep;
 
-            // Special handling based on current step after decrementing
-            if ($this->currentStep === 3 && $this->hasProjectsToAccept) {
+            // Special handling based on the step we're going back to
+            if ($previousStep === Steps::PROJECT_ACCEPTANCE && $this->hasProjectsToAccept) {
                 // Going back to project acceptance - reset to last project or first if all were accepted
                 $this->currentProjectIndex = max(0, count($this->pendingProjects) - 1);
                 $this->acceptTerms = false;
-            } elseif ($this->currentStep === 5 && $this->isPaymentPlan) {
+            } elseif ($previousStep === Steps::PAYMENT_PLAN_AUTH && $this->isPaymentPlan) {
                 // Going back to authorization from confirmation - keep plan settings
                 // No special handling needed, just clear transaction ID
                 $this->transactionId = null;
-            } elseif ($this->currentStep === 4 && $this->isPaymentPlan) {
+            } elseif ($previousStep === Steps::PAYMENT_METHOD && $this->isPaymentPlan) {
                 // Going back to plan configuration from authorization - keep plan settings
                 // Clear authorization data but keep plan configuration
                 $this->agreeToTerms = false;
@@ -1016,26 +933,28 @@ use App\Services\PaymentPlanCalculator;
     }
 
     /**
+     * Alias for goBack (used in step components)
+     */
+    public function goToPrevious()
+    {
+        $this->goBack();
+    }
+
+    /**
      * Change payment method entirely - go back to method selection
      */
     public function changePaymentMethod()
     {
-        // Go back to step 4 and reset payment plan state completely
-        $this->currentStep = 4;
+        // Go back to payment method step and reset payment plan state completely
+        $this->currentStep = Steps::PAYMENT_METHOD;
         $this->resetValidation();
 
         // Reset to payment method selection
         $this->isPaymentPlan = false;
         $this->paymentMethod = null;
-        $this->downPayment = 0;
-        $this->downPaymentPercent = 50;
-        $this->planFrequency = 'monthly';
         $this->planDuration = 3;
-        $this->planStartDate = null;
-        $this->customAmounts = false;
-        $this->installmentAmounts = [];
         $this->paymentSchedule = [];
-        $this->installmentOptions = [];
+        $this->availablePlans = [];
 
         // Clear authorization data
         $this->agreeToTerms = false;
@@ -1055,8 +974,8 @@ use App\Services\PaymentPlanCalculator;
     public function editPaymentPlan()
     {
         if ($this->isPaymentPlan) {
-            // Go back to step 4 (plan configuration) but keep plan settings
-            $this->currentStep = 4;
+            // Go back to payment method step (plan configuration) but keep plan settings
+            $this->currentStep = Steps::PAYMENT_METHOD;
             $this->resetValidation();
 
             // Clear authorization and confirmation data but keep plan configuration
@@ -1116,9 +1035,9 @@ use App\Services\PaymentPlanCalculator;
             'paymentMethod' => $this->paymentMethod,
             'fee' => $this->creditCardFee,
             'isPaymentPlan' => $this->isPaymentPlan,
-            'planFrequency' => $this->planFrequency,
+            'planFrequency' => 'monthly', // Always monthly now
             'planDuration' => $this->planDuration,
-            'downPayment' => $this->downPayment,
+            'downPayment' => 0, // No down payment in simplified plans
             'paymentSchedule' => $this->paymentSchedule,
             'planId' => $this->transactionId,
             'invoices' => collect($this->selectedInvoices)->map(function($invoiceNumber) {
@@ -1151,6 +1070,7 @@ use App\Services\PaymentPlanCalculator;
                         'street' => '', // Could add billing address fields
                         'postal_code' => '',
                     ]);
+                    $lastFour = substr(str_replace(' ', '', $this->cardNumber), -4);
                 } else {
                     // Create reusable check token
                     $token = $customer->tokenizeCheck([
@@ -1160,15 +1080,28 @@ use App\Services\PaymentPlanCalculator;
                         'account_type' => 'Checking',
                         'check_type' => 'Personal',
                     ]);
+                    $lastFour = substr($this->accountNumber, -4);
                 }
                 
-                $paymentResult = $this->paymentService->setupPaymentPlan(
-                    array_merge($paymentData, [
-                        'payment_type' => $this->paymentMethod === 'credit_card' ? 'card' : 'check',
-                    ]),
+                // Create the payment plan with scheduled payments
+                $paymentResult = $this->paymentService->createPaymentPlan(
+                    [
+                        'amount' => $this->paymentAmount,
+                        'planFee' => $this->paymentPlanFee,
+                        'planDuration' => $this->planDuration,
+                        'paymentSchedule' => $this->paymentSchedule,
+                        'invoices' => $paymentData['invoices'],
+                    ],
                     $this->clientInfo,
-                    $token
+                    $token,
+                    $this->paymentMethod === 'credit_card' ? 'card' : 'ach',
+                    $lastFour
                 );
+                
+                // Store the plan ID for confirmation display
+                if ($paymentResult['success']) {
+                    $this->transactionId = $paymentResult['plan_id'];
+                }
             } else {
                 // For one-time payments, process immediately
                 if ($this->paymentMethod === 'credit_card') {
@@ -1299,26 +1232,81 @@ use App\Services\PaymentPlanCalculator;
 
         // Mark as completed
         $this->paymentProcessed = true;
-        $this->currentStep = 7; // Success/confirmation screen
+        $this->currentStep = Steps::CONFIRMATION;
     }
     
     /**
-     * Persist queued accepted projects to the database
+     * Persist queued accepted projects to the database and update PracticeCS
+     * 
+     * This method:
+     * 1. Saves acceptance records to local SQLite database (audit trail)
+     * 2. Updates PracticeCS to change engagement type from EXPANSION to target type
+     *    (e.g., EXPTAX -> TAXDELIVERY) - this "activates" the proposed work
+     * 3. Updates local record with payment and sync status
      */
     private function persistAcceptedProjects()
     {
+        $engagementService = app(EngagementAcceptanceService::class);
+        $staffKey = config('practicecs.payment_integration.staff_key', 1552);
+        
         foreach ($this->projectsToPersist as $project) {
             // Check if already persisted to avoid duplicates
-            $exists = ProjectAcceptance::where('project_engagement_key', $project['project_engagement_key'])
-                ->exists();
+            $existing = ProjectAcceptance::where('project_engagement_key', $project['project_engagement_key'])
+                ->first();
                 
-            if (!$exists) {
-                ProjectAcceptance::create($project);
+            if (!$existing) {
+                // 1. Save to local SQLite database (audit trail) with payment info
+                $acceptance = ProjectAcceptance::create(array_merge($project, [
+                    'paid' => true,
+                    'paid_at' => now(),
+                    'payment_transaction_id' => $this->transactionId ?? null,
+                ]));
                 
                 Log::info('Project acceptance persisted after payment', [
                     'engagement_id' => $project['engagement_id'],
                     'client_key' => $project['client_key'],
                 ]);
+                
+                // 2. Update PracticeCS: Change engagement type from EXPANSION to target type
+                // This converts the "proposed" engagement into an active engagement
+                $result = $engagementService->acceptEngagement(
+                    (int) $project['project_engagement_key'],
+                    $staffKey
+                );
+                
+                // 3. Update local record with sync status
+                if ($result['success']) {
+                    $acceptance->update([
+                        'practicecs_updated' => true,
+                        'new_engagement_type_key' => $result['new_type_KEY'] ?? null,
+                        'practicecs_updated_at' => now(),
+                    ]);
+                    
+                    Log::info('PracticeCS engagement type updated', [
+                        'engagement_KEY' => $project['project_engagement_key'],
+                        'new_type_KEY' => $result['new_type_KEY'] ?? null,
+                    ]);
+                } else {
+                    // Log error but don't fail the payment - local record is saved
+                    $acceptance->update([
+                        'practicecs_updated' => false,
+                        'practicecs_error' => $result['error'] ?? 'Unknown error',
+                    ]);
+                    
+                    Log::error('Failed to update PracticeCS engagement type', [
+                        'engagement_KEY' => $project['project_engagement_key'],
+                        'error' => $result['error'] ?? 'Unknown error',
+                    ]);
+                }
+            } else {
+                // Already exists - update with payment info if not already paid
+                if (!$existing->paid) {
+                    $existing->update([
+                        'paid' => true,
+                        'paid_at' => now(),
+                        'payment_transaction_id' => $this->transactionId ?? null,
+                    ]);
+                }
             }
         }
         
@@ -1633,13 +1621,44 @@ use App\Services\PaymentPlanCalculator;
     public function startOver()
     {
         $this->reset();
-        $this->currentStep = 1;
+        $this->currentStep = Steps::ACCOUNT_TYPE;
+        $this->stepHistory = [];
+    }
+
+    /**
+     * Called when skeleton loading completes to advance to actual step
+     */
+    public function onSkeletonComplete()
+    {
+        // Transition from loading step to actual step
+        if ($this->currentStep === Steps::LOADING_INVOICES) {
+            $this->loadClientInvoices();
+            $this->loadingInvoices = false;
+            $this->currentStep = Steps::INVOICE_SELECTION;
+        } elseif ($this->currentStep === Steps::LOADING_PAYMENT) {
+            $this->currentStep = Steps::PAYMENT_METHOD;
+        } elseif ($this->currentStep === Steps::PROCESSING_PAYMENT) {
+            $this->currentStep = Steps::CONFIRMATION;
+        }
+    }
+
+    /**
+     * Get navigation context for Navigator class
+     */
+    protected function getNavigationContext(): array
+    {
+        return [
+            'hasProjectsToAccept' => $this->hasProjectsToAccept,
+            'currentProjectIndex' => $this->currentProjectIndex,
+            'totalProjects' => count($this->pendingProjects),
+            'isPaymentPlan' => $this->isPaymentPlan,
+        ];
     }
 
     public function render()
     {
         // Safety check: ensure currentProjectIndex is valid
-        if ($this->hasProjectsToAccept && $this->currentStep === 3) {
+        if ($this->hasProjectsToAccept && $this->currentStep === Steps::PROJECT_ACCEPTANCE) {
             if ($this->currentProjectIndex >= count($this->pendingProjects)) {
                 $this->currentProjectIndex = max(0, count($this->pendingProjects) - 1);
             }

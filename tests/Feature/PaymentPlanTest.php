@@ -11,242 +11,187 @@ use Carbon\Carbon;
 /**
  * Payment Plan Tests
  * 
- * Tests for the payment plan functionality including:
- * - Plan creation
- * - Schedule generation
- * - Frequency calculations
- * - Custom installments
- * - Plan validation
+ * Tests for the simplified payment plan functionality:
+ * - 3 months: $150 fee
+ * - 6 months: $300 fee  
+ * - 9 months: $450 fee
+ * 
+ * All plans are monthly payments with no down payment.
  */
 class PaymentPlanTest extends TestCase
 {
     use RefreshDatabase;
 
     /** @test */
-    public function it_can_configure_monthly_payment_plan()
-    {
-        $component = Livewire::test(PaymentFlow::class);
-        
-        $component->set('paymentAmount', 1200.00)
-            ->set('isPaymentPlan', true)
-            ->set('downPayment', 200.00)
-            ->set('planDuration', 4)
-            ->set('planFrequency', 'monthly')
-            ->call('calculatePaymentSchedule');
-        
-        $schedule = $component->get('paymentSchedule');
-        
-        // Should have 5 total payments (1 down + 4 installments)
-        $this->assertCount(5, $schedule);
-        
-        // Verify down payment
-        $this->assertEquals(200.00, $schedule[0]['amount']);
-        $this->assertEquals(0, $schedule[0]['payment_number']);
-        
-        // Verify installment amounts ($1000 / 4 = $250 each)
-        for ($i = 1; $i <= 4; $i++) {
-            $this->assertEquals(250.00, $schedule[$i]['amount']);
-        }
-    }
-
-    /** @test */
-    public function it_calculates_weekly_payment_schedule_correctly()
+    public function it_can_select_3_month_payment_plan()
     {
         $component = Livewire::test(PaymentFlow::class);
         
         $component->set('paymentAmount', 1000.00)
             ->set('isPaymentPlan', true)
-            ->set('downPayment', 100.00)
-            ->set('planDuration', 3)
-            ->set('planFrequency', 'weekly')
-            ->set('planStartDate', now()->format('Y-m-d'))
+            ->call('selectPlanDuration', 3)
             ->call('calculatePaymentSchedule');
         
+        $this->assertEquals(3, $component->get('planDuration'));
+        $this->assertEquals(150.00, $component->get('paymentPlanFee'));
+        
         $schedule = $component->get('paymentSchedule');
-        
-        $this->assertCount(4, $schedule); // 1 down + 3 weekly
-        
-        // Verify dates are 7 days apart
-        $firstPaymentDate = Carbon::parse($schedule[1]['due_date']);
-        $secondPaymentDate = Carbon::parse($schedule[2]['due_date']);
-        
-        $this->assertEquals(7, $firstPaymentDate->diffInDays($secondPaymentDate));
+        $this->assertCount(3, $schedule);
     }
 
     /** @test */
-    public function it_handles_biweekly_payment_frequency()
-    {
-        $component = Livewire::test(PaymentFlow::class);
-        
-        $component->set('paymentAmount', 2000.00)
-            ->set('isPaymentPlan', true)
-            ->set('downPayment', 500.00)
-            ->set('planDuration', 3)
-            ->set('planFrequency', 'biweekly')
-            ->set('planStartDate', now()->format('Y-m-d'))
-            ->call('calculatePaymentSchedule');
-        
-        $schedule = $component->get('paymentSchedule');
-        
-        // Verify dates are 14 days apart
-        if (count($schedule) >= 3) {
-            $firstPaymentDate = Carbon::parse($schedule[1]['due_date']);
-            $secondPaymentDate = Carbon::parse($schedule[2]['due_date']);
-            
-            $this->assertEquals(14, $firstPaymentDate->diffInDays($secondPaymentDate));
-        }
-    }
-
-    /** @test */
-    public function it_supports_custom_installment_amounts()
+    public function it_can_select_6_month_payment_plan()
     {
         $component = Livewire::test(PaymentFlow::class);
         
         $component->set('paymentAmount', 1000.00)
             ->set('isPaymentPlan', true)
-            ->set('downPayment', 100.00)
-            ->set('planDuration', 3)
-            ->set('planFrequency', 'monthly')
-            ->set('customAmounts', true)
-            ->set('installmentAmounts', [400.00, 300.00, 200.00])
+            ->call('selectPlanDuration', 6)
             ->call('calculatePaymentSchedule');
         
-        $schedule = $component->get('paymentSchedule');
-        
-        // Verify custom amounts are used
-        $this->assertEquals(100.00, $schedule[0]['amount']); // Down payment
-        $this->assertEquals(400.00, $schedule[1]['amount']); // First installment
-        $this->assertEquals(300.00, $schedule[2]['amount']); // Second installment
-        $this->assertEquals(200.00, $schedule[3]['amount']); // Third installment
-    }
-
-    /** @test */
-    public function it_validates_custom_amounts_equal_remaining_balance()
-    {
-        $component = Livewire::test(PaymentFlow::class);
-        
-        $component->set('paymentAmount', 1000.00)
-            ->set('downPayment', 100.00)
-            ->set('planDuration', 3)
-            ->set('customAmounts', true)
-            ->set('installmentAmounts', [200.00, 200.00, 200.00]); // Only $600 total, should be $900
-        
-        // This should trigger validation when confirmed
-        $remainingBalance = 900.00; // $1000 - $100 down payment
-        $customTotal = array_sum([200.00, 200.00, 200.00]); // $600
-        
-        $this->assertNotEquals($remainingBalance, $customTotal);
-    }
-
-    /** @test */
-    public function it_calculates_quarterly_payments()
-    {
-        $component = Livewire::test(PaymentFlow::class);
-        
-        $component->set('paymentAmount', 4000.00)
-            ->set('isPaymentPlan', true)
-            ->set('downPayment', 1000.00)
-            ->set('planDuration', 4)
-            ->set('planFrequency', 'quarterly')
-            ->set('planStartDate', now()->format('Y-m-d'))
-            ->call('calculatePaymentSchedule');
+        $this->assertEquals(6, $component->get('planDuration'));
+        $this->assertEquals(300.00, $component->get('paymentPlanFee'));
         
         $schedule = $component->get('paymentSchedule');
-        
-        // Verify dates are ~90 days apart
-        if (count($schedule) >= 3) {
-            $firstPaymentDate = Carbon::parse($schedule[1]['due_date']);
-            $secondPaymentDate = Carbon::parse($schedule[2]['due_date']);
-            
-            $daysDiff = $firstPaymentDate->diffInDays($secondPaymentDate);
-            $this->assertGreaterThanOrEqual(89, $daysDiff);
-            $this->assertLessThanOrEqual(92, $daysDiff);
-        }
+        $this->assertCount(6, $schedule);
     }
 
     /** @test */
-    public function it_allows_deferred_start_date()
+    public function it_can_select_9_month_payment_plan()
     {
-        $futureDate = now()->addDays(30);
-        
         $component = Livewire::test(PaymentFlow::class);
         
         $component->set('paymentAmount', 1000.00)
             ->set('isPaymentPlan', true)
-            ->set('downPayment', 0.00) // No down payment
-            ->set('planDuration', 4)
-            ->set('planFrequency', 'monthly')
-            ->set('planStartDate', $futureDate->format('Y-m-d'))
+            ->call('selectPlanDuration', 9)
+            ->call('calculatePaymentSchedule');
+        
+        $this->assertEquals(9, $component->get('planDuration'));
+        $this->assertEquals(450.00, $component->get('paymentPlanFee'));
+        
+        $schedule = $component->get('paymentSchedule');
+        $this->assertCount(9, $schedule);
+    }
+
+    /** @test */
+    public function it_rejects_invalid_plan_durations()
+    {
+        $component = Livewire::test(PaymentFlow::class);
+        
+        $component->set('paymentAmount', 1000.00)
+            ->set('isPaymentPlan', true)
+            ->call('selectPlanDuration', 12) // Invalid - not 3, 6, or 9
+            ->assertHasErrors(['planDuration']);
+    }
+
+    /** @test */
+    public function it_calculates_equal_monthly_payments()
+    {
+        $component = Livewire::test(PaymentFlow::class);
+        
+        // $1000 + $150 fee = $1150 / 3 = $383.33/month
+        $component->set('paymentAmount', 1000.00)
+            ->set('isPaymentPlan', true)
+            ->call('selectPlanDuration', 3)
             ->call('calculatePaymentSchedule');
         
         $schedule = $component->get('paymentSchedule');
         
-        if (count($schedule) > 0) {
-            $firstPaymentDate = Carbon::parse($schedule[0]['due_date']);
-            $this->assertTrue($firstPaymentDate->isSameDay($futureDate));
-        }
+        $this->assertCount(3, $schedule);
+        $this->assertEquals(383.33, $schedule[0]['amount']);
+        $this->assertEquals(383.33, $schedule[1]['amount']);
+        // Last payment may have rounding adjustment
+        $this->assertEquals(383.34, $schedule[2]['amount']);
+        
+        // Total should equal invoice + fee
+        $totalPayments = array_sum(array_column($schedule, 'amount'));
+        $this->assertEquals(1150.00, $totalPayments);
     }
 
     /** @test */
-    public function it_calculates_payment_plan_fee()
+    public function it_calculates_payment_schedule_with_monthly_dates()
+    {
+        Carbon::setTestNow(Carbon::create(2024, 1, 15));
+        
+        $component = Livewire::test(PaymentFlow::class);
+        
+        $component->set('paymentAmount', 1000.00)
+            ->set('isPaymentPlan', true)
+            ->call('selectPlanDuration', 3)
+            ->call('calculatePaymentSchedule');
+        
+        $schedule = $component->get('paymentSchedule');
+        
+        // Verify payment labels
+        $this->assertEquals('Payment 1 of 3', $schedule[0]['label']);
+        $this->assertEquals('Payment 2 of 3', $schedule[1]['label']);
+        $this->assertEquals('Payment 3 of 3', $schedule[2]['label']);
+        
+        Carbon::setTestNow();
+    }
+
+    /** @test */
+    public function it_shows_available_plan_options_when_payment_plan_selected()
     {
         $component = Livewire::test(PaymentFlow::class);
         
         $component->set('paymentAmount', 1000.00)
-            ->set('planDuration', 6)
-            ->set('planFrequency', 'monthly');
+            ->call('selectPaymentMethod', 'payment_plan');
         
-        // Trigger fee calculation (implementation would be in calculatePaymentPlanFee method)
-        $component->call('calculatePaymentPlanFee');
+        $availablePlans = $component->get('availablePlans');
         
-        $fee = $component->get('paymentPlanFee');
+        $this->assertCount(3, $availablePlans);
         
-        // Fee should be calculated based on plan duration
-        $this->assertGreaterThanOrEqual(0, $fee);
+        // Verify 3 month plan
+        $this->assertEquals(3, $availablePlans[0]['months']);
+        $this->assertEquals(150.00, $availablePlans[0]['fee']);
+        $this->assertEquals(1150.00, $availablePlans[0]['total_amount']);
+        
+        // Verify 6 month plan
+        $this->assertEquals(6, $availablePlans[1]['months']);
+        $this->assertEquals(300.00, $availablePlans[1]['fee']);
+        $this->assertEquals(1300.00, $availablePlans[1]['total_amount']);
+        
+        // Verify 9 month plan
+        $this->assertEquals(9, $availablePlans[2]['months']);
+        $this->assertEquals(450.00, $availablePlans[2]['fee']);
+        $this->assertEquals(1450.00, $availablePlans[2]['total_amount']);
     }
 
     /** @test */
-    public function it_validates_minimum_plan_duration()
+    public function it_defaults_to_3_month_plan()
     {
         $component = Livewire::test(PaymentFlow::class);
         
         $component->set('paymentAmount', 1000.00)
-            ->set('planDuration', 1) // Too short
+            ->call('selectPaymentMethod', 'payment_plan');
+        
+        $this->assertEquals(3, $component->get('planDuration'));
+        $this->assertEquals(150.00, $component->get('paymentPlanFee'));
+    }
+
+    /** @test */
+    public function it_validates_plan_duration_on_confirm()
+    {
+        $component = Livewire::test(PaymentFlow::class);
+        
+        $component->set('paymentAmount', 1000.00)
+            ->set('isPaymentPlan', true)
+            ->set('planDuration', 5) // Invalid duration
             ->call('confirmPaymentPlan')
             ->assertHasErrors(['planDuration']);
     }
 
     /** @test */
-    public function it_validates_maximum_plan_duration()
+    public function it_allows_valid_plan_durations_on_confirm()
     {
         $component = Livewire::test(PaymentFlow::class);
         
         $component->set('paymentAmount', 1000.00)
-            ->set('planDuration', 13) // Too long (max is 12)
-            ->call('confirmPaymentPlan')
-            ->assertHasErrors(['planDuration']);
-    }
-
-    /** @test */
-    public function it_handles_no_down_payment()
-    {
-        $component = Livewire::test(PaymentFlow::class);
-        
-        $component->set('paymentAmount', 1200.00)
             ->set('isPaymentPlan', true)
-            ->set('downPayment', 0.00)
-            ->set('planDuration', 4)
-            ->set('planFrequency', 'monthly')
-            ->call('calculatePaymentSchedule');
-        
-        $schedule = $component->get('paymentSchedule');
-        
-        // Should have 4 payments of $300 each
-        $this->assertCount(4, $schedule);
-        
-        foreach ($schedule as $payment) {
-            $this->assertEquals(300.00, $payment['amount']);
-        }
+            ->set('planDuration', 6) // Valid duration
+            ->call('confirmPaymentPlan')
+            ->assertHasNoErrors(['planDuration']);
     }
 
     /** @test */
@@ -255,54 +200,42 @@ class PaymentPlanTest extends TestCase
         $component = Livewire::test(PaymentFlow::class);
         
         $component->set('paymentAmount', 1000.00)
-            ->set('paymentMethod', 'credit_card')
-            ->set('isPaymentPlan', true)
-            ->set('planDuration', 6);
+            ->call('selectPaymentMethod', 'payment_plan');
         
-        // Calculate credit card fee (3%)
-        $component->call('selectPaymentMethod', 'credit_card');
+        // Default 3 month plan = $150 fee
+        $this->assertEquals(150.00, $component->get('paymentPlanFee'));
+        
+        // Now set payment method to credit card (plan already selected)
+        // Credit card fee should be calculated on invoice + plan fee
+        // ($1000 + $150) * 0.03 = $34.50
+        $component->set('paymentMethod', 'credit_card');
+        $component->call('calculatePaymentPlanFee'); // This should update credit card fee too
+        
         $creditCardFee = $component->get('creditCardFee');
-        $this->assertEquals(30.00, $creditCardFee);
-        
-        // Calculate plan fee
-        $component->call('calculatePaymentPlanFee');
-        $planFee = $component->get('paymentPlanFee');
-        
-        // Total should be original amount + both fees
-        $totalObligation = 1000.00 + $creditCardFee + $planFee;
-        $this->assertGreaterThan(1030.00, $totalObligation);
+        $this->assertEquals(34.50, $creditCardFee);
     }
 
     /** @test */
-    public function it_displays_payment_schedule_preview()
+    public function it_can_change_payment_method_and_reset_plan()
     {
         $component = Livewire::test(PaymentFlow::class);
         
-        $component->set('paymentAmount', 600.00)
-            ->set('isPaymentPlan', true)
-            ->set('downPayment', 100.00)
-            ->set('planDuration', 5)
-            ->set('planFrequency', 'monthly')
-            ->set('currentStep', 5) // Payment plan config step
-            ->call('calculatePaymentSchedule')
-            ->assertSee('Payment Schedule Preview')
-            ->assertSee('$100.00') // Down payment
-            ->assertSee('Due Today');
-    }
-
-    /** @test */
-    public function it_can_edit_payment_plan_before_confirmation()
-    {
-        $component = Livewire::test(PaymentFlow::class);
+        $component->set('paymentAmount', 1000.00)
+            ->call('selectPaymentMethod', 'payment_plan')
+            ->call('selectPlanDuration', 9);
         
-        $component->set('currentStep', 6) // On confirmation step
-            ->set('isPaymentPlan', true)
-            ->call('editPaymentPlan')
-            ->assertSet('currentStep', 5); // Back to plan config
+        $this->assertEquals(9, $component->get('planDuration'));
+        $this->assertTrue($component->get('isPaymentPlan'));
+        
+        // Change payment method
+        $component->call('changePaymentMethod');
+        
+        $this->assertFalse($component->get('isPaymentPlan'));
+        $this->assertNull($component->get('paymentMethod'));
     }
 
     /** @test */
-    public function it_requires_agreement_to_terms_for_payment_plan()
+    public function it_requires_terms_agreement_for_payment_plan()
     {
         $component = Livewire::test(PaymentFlow::class);
         
@@ -311,5 +244,54 @@ class PaymentPlanTest extends TestCase
             ->set('agreeToTerms', false)
             ->call('authorizePaymentPlan')
             ->assertHasErrors(['agreeToTerms']);
+    }
+
+    /** @test */
+    public function it_can_edit_payment_plan_before_confirmation()
+    {
+        $component = Livewire::test(PaymentFlow::class);
+        
+        $component->set('currentStep', 6) // On payment details step
+            ->set('isPaymentPlan', true)
+            ->call('editPaymentPlan')
+            ->assertSet('currentStep', 4); // Back to plan selection (now step 4)
+    }
+
+    /** @test */
+    public function it_updates_schedule_when_plan_duration_changes()
+    {
+        $component = Livewire::test(PaymentFlow::class);
+        
+        $component->set('paymentAmount', 900.00)
+            ->set('isPaymentPlan', true)
+            ->call('selectPlanDuration', 3)
+            ->call('calculatePaymentSchedule');
+        
+        $schedule3 = $component->get('paymentSchedule');
+        $this->assertCount(3, $schedule3);
+        
+        $component->call('selectPlanDuration', 9)
+            ->call('calculatePaymentSchedule');
+        
+        $schedule9 = $component->get('paymentSchedule');
+        $this->assertCount(9, $schedule9);
+    }
+
+    /** @test */
+    public function it_calculates_correct_total_with_large_invoice()
+    {
+        $component = Livewire::test(PaymentFlow::class);
+        
+        // Large invoice: $10,000
+        $component->set('paymentAmount', 10000.00)
+            ->set('isPaymentPlan', true)
+            ->call('selectPlanDuration', 9)
+            ->call('calculatePaymentSchedule');
+        
+        // $10,000 + $450 fee = $10,450 / 9 = $1161.11/month
+        $schedule = $component->get('paymentSchedule');
+        
+        $totalPayments = array_sum(array_column($schedule, 'amount'));
+        $this->assertEquals(10450.00, round($totalPayments, 2));
     }
 }

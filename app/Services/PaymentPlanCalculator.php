@@ -4,99 +4,108 @@ namespace App\Services;
 
 use Carbon\Carbon;
 
+/**
+ * Simple payment plan calculator.
+ * 
+ * Supports only 3 plan options:
+ * - 3 months: $150 fee
+ * - 6 months: $300 fee
+ * - 9 months: $450 fee
+ * 
+ * All plans are monthly payments with no down payment required.
+ */
 class PaymentPlanCalculator
 {
     /**
-     * Calculate payment plan fee based on total amount, duration, and down payment.
+     * Available plan durations and their fees.
+     */
+    public const PLAN_OPTIONS = [
+        3 => 150.00,
+        6 => 300.00,
+        9 => 450.00,
+    ];
+
+    /**
+     * Get available plan options with calculated payment amounts.
+     *
+     * @param float $invoiceAmount The invoice total to be financed
+     * @return array Array of plan options with duration, fee, and monthly payment
+     */
+    public function getAvailablePlans(float $invoiceAmount): array
+    {
+        $plans = [];
+
+        foreach (self::PLAN_OPTIONS as $months => $fee) {
+            $totalAmount = $invoiceAmount + $fee;
+            $monthlyPayment = round($totalAmount / $months, 2);
+
+            $plans[] = [
+                'months' => $months,
+                'fee' => $fee,
+                'total_amount' => round($totalAmount, 2),
+                'monthly_payment' => $monthlyPayment,
+            ];
+        }
+
+        return $plans;
+    }
+
+    /**
+     * Get the fee for a specific plan duration.
+     *
+     * @param int $months Plan duration in months (3, 6, or 9)
+     * @return float The fee amount, or 0 if invalid duration
+     */
+    public function getFee(int $months): float
+    {
+        return self::PLAN_OPTIONS[$months] ?? 0.00;
+    }
+
+    /**
+     * Check if a plan duration is valid.
+     *
+     * @param int $months Plan duration in months
+     * @return bool True if valid duration
+     */
+    public function isValidDuration(int $months): bool
+    {
+        return array_key_exists($months, self::PLAN_OPTIONS);
+    }
+
+    /**
+     * Calculate payment plan fee.
      * 
-     * @param float $paymentAmount Total invoice amount
-     * @param float $downPayment Down payment amount
-     * @param int $duration Number of installments
-     * @param string $frequency Payment frequency
-     * @return array Fee details ['fee_amount' => float, 'months' => int, 'duration_multiplier' => float, 'down_payment_multiplier' => float, 'down_payment_percent' => float]
+     * Simplified version - just returns the flat fee for the duration.
+     *
+     * @param float $paymentAmount Total invoice amount (unused in new implementation)
+     * @param float $downPayment Down payment amount (unused - no longer supported)
+     * @param int $duration Number of months (3, 6, or 9)
+     * @param string $frequency Payment frequency (unused - always monthly now)
+     * @return array Fee details for backwards compatibility
      */
     public function calculateFee(float $paymentAmount, float $downPayment, int $duration, string $frequency): array
     {
-        $feeRanges = config('payment-fees.payment_plan_fees');
-        
-        $baseFee = 0.00;
-        
-        // Find the base fee based on payment amount
-        foreach ($feeRanges as $range) {
-            if ($paymentAmount >= $range['min'] && $paymentAmount < $range['max']) {
-                $baseFee = $range['fee'];
-                break;
-            }
-        }
-
-        // Calculate total duration in months
-        $months = $this->calculateMonthsFromDuration($duration, $frequency);
-        
-        // Determine duration multiplier
-        $durationMultiplier = $this->getDurationMultiplier($months);
-        
-        // Calculate down payment percentage
-        $downPaymentPercent = $paymentAmount > 0 ? ($downPayment / $paymentAmount) : 0;
-        
-        // Down payment multiplier: 1 - (down payment %)
-        // e.g., 25% down = 0.75x, 50% down = 0.50x, 75% down = 0.25x
-        $downPaymentMultiplier = 1 - $downPaymentPercent;
-        
-        // Apply both multipliers to base fee
-        $finalFee = round($baseFee * $durationMultiplier * $downPaymentMultiplier, 2);
+        $fee = $this->getFee($duration);
 
         return [
-            'fee_amount' => $finalFee,
-            'months' => $months,
-            'duration_multiplier' => $durationMultiplier,
-            'down_payment_multiplier' => $downPaymentMultiplier,
-            'down_payment_percent' => round($downPaymentPercent * 100, 2),
+            'fee_amount' => $fee,
+            'months' => $duration,
+            'duration_multiplier' => 1.0,
+            'down_payment_multiplier' => 1.0,
+            'down_payment_percent' => 0,
         ];
-    }
-    
-    /**
-     * Calculate approximate months from duration and frequency.
-     */
-    public function calculateMonthsFromDuration(int $duration, string $frequency): int
-    {
-        $daysPerInstallment = $this->getDaysPerInstallment($frequency);
-        $totalDays = $duration * $daysPerInstallment;
-        
-        // Convert days to months (using 30 days per month)
-        return (int) round($totalDays / 30);
-    }
-    
-    /**
-     * Get duration multiplier based on total months.
-     * 0-3 months: 1.0
-     * 4-7 months: 1.75
-     * 8-11 months: 2.5
-     * Maximum allowed plan duration is 11 months
-     */
-    public function getDurationMultiplier(int $months): float
-    {
-        if ($months <= 3) {
-            return 1.0;
-        } elseif ($months <= 7) {
-            return 1.75;
-        } elseif ($months <= 11) {
-            return 2.5;
-        } else {
-            // Plans over 11 months are not allowed, but return 0 to indicate invalid
-            return 0;
-        }
     }
 
     /**
-     * Calculate the payment schedule dates and amounts.
+     * Calculate the payment schedule.
      *
      * @param float $totalAmountToFinance Total amount including fees
-     * @param float $downPayment Down payment amount
-     * @param int $duration Number of installments
-     * @param string $frequency Payment frequency
-     * @param string|null $startDate Start date for installments
-     * @param array $customInstallments Optional custom installment amounts
-     * @return array Array of schedule items
+     * @param float $downPayment Down payment amount (unused - always 0)
+     * @param int $duration Number of monthly payments (3, 6, or 9)
+     * @param string $frequency Payment frequency (unused - always monthly)
+     * @param string|null $startDate Start date for first payment
+     * @param array $customInstallments Custom amounts (unused - always equal payments)
+     * @return array Array of scheduled payments
      */
     public function calculateSchedule(
         float $totalAmountToFinance,
@@ -106,106 +115,79 @@ class PaymentPlanCalculator
         ?string $startDate = null,
         array $customInstallments = []
     ): array {
-        $schedule = [];
-        $remainingBalance = $totalAmountToFinance - $downPayment;
-
-        if ($remainingBalance <= 0 || $duration < 1) {
+        if ($totalAmountToFinance <= 0 || !$this->isValidDuration($duration)) {
             return [];
         }
 
-        $frequencyDays = $this->getDaysPerInstallment($frequency);
+        $schedule = [];
+        $monthlyPayment = round($totalAmountToFinance / $duration, 2);
+        $lastPayment = $totalAmountToFinance - ($monthlyPayment * ($duration - 1));
+        
         $start = $startDate ? Carbon::parse($startDate) : now();
 
-        // Add down payment as first payment (due today)
-        if ($downPayment > 0) {
+        for ($i = 1; $i <= $duration; $i++) {
+            $dueDate = $start->copy()->addMonths($i);
+            $amount = ($i === $duration) ? $lastPayment : $monthlyPayment;
+
             $schedule[] = [
-                'payment_number' => 0,
-                'due_date' => now()->format('M d, Y'),
-                'amount' => $downPayment,
-                'label' => 'Down Payment (Today)',
+                'payment_number' => $i,
+                'due_date' => $dueDate->format('M d, Y'),
+                'amount' => round($amount, 2),
+                'label' => "Payment $i of $duration",
             ];
-        }
-
-        // Generate installments
-        if (!empty($customInstallments)) {
-            // Use custom amounts logic
-            $totalCustomAmount = array_sum($customInstallments);
-            
-            // If custom amounts don't match balance, adjust the last payment
-            if (abs($totalCustomAmount - $remainingBalance) > 0.01) {
-                $lastIndex = count($customInstallments) - 1;
-                if ($lastIndex >= 0) {
-                    $diff = $remainingBalance - $totalCustomAmount;
-                    $customInstallments[$lastIndex] += $diff;
-                }
-            }
-
-            for ($i = 0; $i < min($duration, count($customInstallments)); $i++) {
-                $dueDate = $start->copy()->addDays($frequencyDays * ($i + 1));
-                $schedule[] = [
-                    'payment_number' => $i + 1,
-                    'due_date' => $dueDate->format('M d, Y'),
-                    'amount' => $customInstallments[$i],
-                    'label' => 'Payment ' . ($i + 1) . ' of ' . $duration,
-                ];
-            }
-        } else {
-            // Equal installments
-            $installmentAmount = round($remainingBalance / $duration, 2);
-            $lastPaymentAmount = $remainingBalance - ($installmentAmount * ($duration - 1));
-
-            for ($i = 1; $i <= $duration; $i++) {
-                $dueDate = $start->copy()->addDays($frequencyDays * $i);
-                $amount = ($i === $duration) ? $lastPaymentAmount : $installmentAmount;
-
-                $schedule[] = [
-                    'payment_number' => $i,
-                    'due_date' => $dueDate->format('M d, Y'),
-                    'amount' => $amount,
-                    'label' => 'Payment ' . $i . ' of ' . $duration,
-                ];
-            }
         }
 
         return $schedule;
     }
 
     /**
-     * Get the maximum allowed installments for a given frequency.
-     * Note: Only weekly, biweekly, and monthly are available to users.
-     * Maximum term is 11 months.
+     * Get valid plan durations.
+     *
+     * @return array Array of valid month durations
      */
-    public function getMaxInstallments(string $frequency): int
+    public function getValidDurations(): array
     {
-        return match($frequency) {
-            'weekly' => 52,
-            'biweekly' => 26,
-            'monthly' => 12,
-            'quarterly' => 4,
-            'semiannually' => 2,
-            'annually' => 1,
-            default => 12,
-        };
+        return array_keys(self::PLAN_OPTIONS);
+    }
+
+    // -------------------------------------------------------------------------
+    // Legacy methods kept for backwards compatibility
+    // -------------------------------------------------------------------------
+
+    /**
+     * @deprecated No longer used - kept for backwards compatibility
+     */
+    public function calculateMonthsFromDuration(int $duration, string $frequency): int
+    {
+        return $duration; // Now duration IS months
     }
 
     /**
-     * Get days per installment for frequency.
+     * @deprecated No longer used - kept for backwards compatibility
+     */
+    public function getDurationMultiplier(int $months): float
+    {
+        return 1.0;
+    }
+
+    /**
+     * @deprecated No longer used - kept for backwards compatibility
+     */
+    public function getMaxInstallments(string $frequency): int
+    {
+        return 9; // Max is now 9 months
+    }
+
+    /**
+     * @deprecated No longer used - kept for backwards compatibility
      */
     public function getDaysPerInstallment(string $frequency): int
     {
-        return match($frequency) {
-            'weekly' => 7,
-            'biweekly' => 14,
-            'monthly' => 30,
-            'quarterly' => 90,
-            'semiannually' => 180,
-            'annually' => 365,
-            default => 30,
-        };
+        return 30; // Always monthly
     }
-    
+
     /**
-     * Initialize equal custom amounts.
+     * @deprecated No longer used - kept for backwards compatibility
      */
     public function getEqualInstallments(float $totalAmount, int $count): array
     {
@@ -213,8 +195,6 @@ class PaymentPlanCalculator
         
         $equalAmount = round($totalAmount / $count, 2);
         $amounts = array_fill(0, $count, $equalAmount);
-        
-        // Adjust last
         $amounts[$count - 1] = $totalAmount - ($equalAmount * ($count - 1));
         
         return $amounts;

@@ -5,10 +5,13 @@
 namespace App\Services;
 
 use App\Models\Customer;
+use App\Models\Payment;
+use App\Models\PaymentPlan;
 use MiPaymentChoice\Cashier\Services\QuickPaymentsService;
 use MiPaymentChoice\Cashier\Services\TokenService;
 use MiPaymentChoice\Cashier\Exceptions\PaymentFailedException;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 /**
  * PaymentService
@@ -316,5 +319,172 @@ class PaymentService
 
         // Handle webhook events as needed
         // MiPaymentChoice may send notifications for transaction status updates
+    }
+
+    /**
+     * Create a new payment plan and schedule all payments.
+     *
+     * @param array $planData Payment plan configuration
+     * @param array $clientInfo Client information from PracticeCS
+     * @param string $paymentMethodToken Saved payment method token
+     * @param string $paymentMethodType 'card' or 'ach'
+     * @param string|null $lastFour Last 4 digits of card/account
+     * @return array Result with success status and plan details
+     */
+    public function createPaymentPlan(
+        array $planData,
+        array $clientInfo,
+        string $paymentMethodToken,
+        string $paymentMethodType,
+        ?string $lastFour = null
+    ): array {
+        DB::beginTransaction();
+
+        try {
+            // Get or create customer
+            $customer = $this->getOrCreateCustomer($clientInfo);
+
+            // Calculate plan amounts
+            $invoiceAmount = (float) $planData['amount'];
+            $planFee = (float) $planData['planFee'];
+            $totalAmount = $invoiceAmount + $planFee;
+            $durationMonths = (int) $planData['planDuration'];
+            $monthlyPayment = round($totalAmount / $durationMonths, 2);
+
+            // Generate unique plan ID
+            $planId = PaymentPlan::generatePlanId();
+
+            // Create the payment plan record
+            $paymentPlan = PaymentPlan::create([
+                'customer_id' => $customer->id,
+                'client_key' => $clientInfo['client_KEY'],
+                'plan_id' => $planId,
+                'invoice_amount' => $invoiceAmount,
+                'plan_fee' => $planFee,
+                'total_amount' => $totalAmount,
+                'monthly_payment' => $monthlyPayment,
+                'duration_months' => $durationMonths,
+                'payment_method_token' => $paymentMethodToken,
+                'payment_method_type' => $paymentMethodType,
+                'payment_method_last_four' => $lastFour,
+                'status' => PaymentPlan::STATUS_ACTIVE,
+                'payments_completed' => 0,
+                'payments_failed' => 0,
+                'amount_paid' => 0,
+                'amount_remaining' => $totalAmount,
+                'start_date' => now(),
+                'next_payment_date' => now()->addMonth(),
+                'invoice_references' => $planData['invoices'] ?? [],
+                'metadata' => [
+                    'payment_schedule' => $planData['paymentSchedule'] ?? [],
+                    'client_name' => $clientInfo['client_name'] ?? null,
+                    'created_at' => now()->toIso8601String(),
+                ],
+            ]);
+
+            // Create scheduled payment records for visibility
+            $paymentPlan->createScheduledPayments();
+
+            DB::commit();
+
+            Log::info('Payment plan created successfully', [
+                'plan_id' => $planId,
+                'customer_id' => $customer->id,
+                'client_key' => $clientInfo['client_KEY'],
+                'total_amount' => $totalAmount,
+                'duration_months' => $durationMonths,
+                'monthly_payment' => $monthlyPayment,
+            ]);
+
+            return [
+                'success' => true,
+                'plan_id' => $planId,
+                'payment_plan' => $paymentPlan,
+                'customer_id' => $customer->id,
+                'monthly_payment' => $monthlyPayment,
+                'next_payment_date' => $paymentPlan->next_payment_date->format('Y-m-d'),
+            ];
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            Log::error('Failed to create payment plan', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'client_info' => $clientInfo,
+            ]);
+
+            return [
+                'success' => false,
+                'error' => 'Failed to create payment plan: ' . $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * Record a one-time payment in the database.
+     *
+     * @param array $paymentData Payment details
+     * @param array $clientInfo Client information
+     * @param string $transactionId MiPaymentChoice transaction ID
+     * @return Payment
+     */
+    public function recordPayment(array $paymentData, array $clientInfo, string $transactionId): Payment
+    {
+        $customer = $this->getOrCreateCustomer($clientInfo);
+
+        return Payment::create([
+            'customer_id' => $customer->id,
+            'client_key' => $clientInfo['client_KEY'],
+            'transaction_id' => $transactionId,
+            'amount' => $paymentData['amount'],
+            'fee' => $paymentData['fee'] ?? 0,
+            'total_amount' => ($paymentData['amount'] + ($paymentData['fee'] ?? 0)),
+            'payment_method' => $paymentData['paymentMethod'],
+            'payment_method_last_four' => $paymentData['lastFour'] ?? null,
+            'status' => Payment::STATUS_COMPLETED,
+            'description' => $paymentData['description'] ?? null,
+            'metadata' => [
+                'invoices' => $paymentData['invoices'] ?? [],
+                'client_name' => $clientInfo['client_name'] ?? null,
+            ],
+            'processed_at' => now(),
+        ]);
+    }
+
+    /**
+     * Get a payment plan by plan ID.
+     *
+     * @param string $planId
+     * @return PaymentPlan|null
+     */
+    public function getPaymentPlan(string $planId): ?PaymentPlan
+    {
+        return PaymentPlan::where('plan_id', $planId)->first();
+    }
+
+    /**
+     * Cancel a payment plan.
+     *
+     * @param string $planId
+     * @param string|null $reason
+     * @return bool
+     */
+    public function cancelPaymentPlan(string $planId, ?string $reason = null): bool
+    {
+        $plan = $this->getPaymentPlan($planId);
+
+        if (!$plan || !$plan->isActive()) {
+            return false;
+        }
+
+        $plan->cancel($reason);
+
+        Log::info('Payment plan cancelled', [
+            'plan_id' => $planId,
+            'reason' => $reason,
+        ]);
+
+        return true;
     }
 }

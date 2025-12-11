@@ -9,17 +9,18 @@
     <link href="https://fonts.bunny.net/css?family=inter:400,500,600&display=swap" rel="stylesheet" />
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     <script src="https://js.stripe.com/v3/"></script>
-    @livewireStyles
+    @fluxAppearance
 </head>
 <body class="min-h-screen bg-zinc-50 dark:bg-zinc-900">
+    
+    <flux:toast position="top right" />
     
     <div class="container mx-auto px-4 py-8 max-w-5xl">
         @yield('content')
         {{ $slot ?? '' }}
     </div>
     
-    <script src="/flux/flux.min.js" data-navigate-track="reload"></script>
-    @livewireScripts
+    @fluxScripts
     @stack('scripts')
 </body>
 </html>

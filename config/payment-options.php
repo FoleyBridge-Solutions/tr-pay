@@ -23,33 +23,15 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Payment Plan Defaults
+    | Payment Plan Options
     |--------------------------------------------------------------------------
     |
-    | Default values for payment plan calculations.
+    | Simple payment plan configuration.
+    | Plans available: 3, 6, or 9 months (always monthly payments)
     |
     */
 
-    'default_down_payment_percent' => (float) env('DEFAULT_DOWN_PAYMENT', 0.20), // 20%
-
-    'minimum_down_payment_percent' => (float) env('MINIMUM_DOWN_PAYMENT', 0.10), // 10%
-
-    'maximum_down_payment_percent' => (float) env('MAXIMUM_DOWN_PAYMENT', 0.90), // 90%
-
-    /*
-    |--------------------------------------------------------------------------
-    | Payment Plan Limits
-    |--------------------------------------------------------------------------
-    |
-    | Maximum number of installments allowed for different payment frequencies.
-    |
-    */
-
-    'max_installments' => [
-        'weekly' => (int) env('MAX_INSTALLMENTS_WEEKLY', 52),
-        'biweekly' => (int) env('MAX_INSTALLMENTS_BIWEEKLY', 26),
-        'monthly' => (int) env('MAX_INSTALLMENTS_MONTHLY', 24),
-    ],
+    'payment_plan_durations' => [3, 6, 9], // Allowed plan durations in months
 
     /*
     |--------------------------------------------------------------------------
