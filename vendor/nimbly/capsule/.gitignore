@@ -1,6 +1,0 @@
-.idea/
-vendor/
-build/
-tests/tmp
-composer.lock
-.phpunit.result.cache

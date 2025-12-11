@@ -55,17 +55,6 @@
                 </div>
             </button>
 
-            {{-- TEMPORARILY DISABLED: Payment Plan --}}
-            <button disabled type="button" class="h-40 flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-zinc-200 bg-zinc-100 cursor-not-allowed opacity-50">
-                <svg class="w-12 h-12 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-                </svg>
-                <div>
-                    <div class="text-lg font-semibold text-zinc-400">Payment Plan</div>
-                    <div class="text-sm text-zinc-400">Coming Soon</div>
-                </div>
-            </button>
-            {{-- Original Payment Plan Button:
             <button wire:click="selectPaymentMethod('payment_plan')" type="button" class="h-40 flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-zinc-300 hover:border-zinc-500 bg-white hover:bg-zinc-50 transition-all hover:scale-[1.02] active:scale-[0.98]">
                 <svg class="w-12 h-12 text-zinc-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
@@ -75,7 +64,6 @@
                     <div class="text-sm text-zinc-600">Pay over time</div>
                 </div>
             </button>
-            --}}
         </div>
 
         <div class="text-center pt-4">

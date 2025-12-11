@@ -227,20 +227,17 @@ class PaymentFlow extends Component
         // Set loading state for skeleton
         $this->loadingInvoices = true;
 
-        // TEMPORARILY DISABLED: Check for pending projects BEFORE loading invoices
-        // $this->checkForPendingProjects();
-        // 
-        // if ($this->hasProjectsToAccept) {
-        //     // Go to project acceptance step
-        //     $this->goToStep(Steps::PROJECT_ACCEPTANCE);
-        //     $this->loadingInvoices = false;
-        // } else {
-        //     // Show loading skeleton - onSkeletonComplete will load invoices
-        //     $this->goToStep(Steps::LOADING_INVOICES);
-        // }
+        // Check for pending projects BEFORE loading invoices
+        $this->checkForPendingProjects();
         
-        // Skip project check, go directly to loading invoices
-        $this->goToStep(Steps::LOADING_INVOICES);
+        if ($this->hasProjectsToAccept) {
+            // Go to project acceptance step
+            $this->goToStep(Steps::PROJECT_ACCEPTANCE);
+            $this->loadingInvoices = false;
+        } else {
+            // Show loading skeleton - onSkeletonComplete will load invoices
+            $this->goToStep(Steps::LOADING_INVOICES);
+        }
     }
     
     /**
