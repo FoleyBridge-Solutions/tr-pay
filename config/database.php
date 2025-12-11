@@ -105,29 +105,18 @@ return [
             'sslmode' => 'prefer',
         ],
 
-        // ⚠️⚠️⚠️ DEVELOPMENT MODE - USING TEST DATABASE ⚠️⚠️⚠️
-        // This connection currently points to CSP_345844_TestDoNotUse for safe development
-        // Once ready for production, update to use production database
-        //
-        // CURRENT CONFIGURATION:
-        // - Points to CSP_345844_TestDoNotUse (test database)
-        // - Write access ENABLED for development/testing
-        // - Safe to test payment integration
-        //
-        // BEFORE PRODUCTION:
-        // - Update TEST_DB_DATABASE to production database name (CSP_345844_BurkhartPeterson)
-        // - Review all write operations
-        // - Enable monitoring and logging
-        // - Test thoroughly on test database first
+        // ✅ PRODUCTION MODE - USING PRODUCTION DATABASE
+        // This connection points to CSP_345844_BurkhartPeterson (production)
+        // Write access is controlled by PRACTICECS_WRITE_ENABLED in .env
         'sqlsrv' => [
             'driver' => 'sqlsrv',
-            'readonly' => false, // ✅ WRITE ACCESS ENABLED FOR TESTING
+            'readonly' => false,
             'url' => env('DB_URL'),
-            'host' => env('TEST_DB_HOST', env('DB_HOST', 'localhost')),
-            'port' => env('TEST_DB_PORT', env('DB_PORT', '1433')),
-            'database' => env('TEST_DB_DATABASE', 'CSP_345844_TestDoNotUse'),
-            'username' => env('TEST_DB_USERNAME', env('DB_USERNAME', 'root')),
-            'password' => env('TEST_DB_PASSWORD', env('DB_PASSWORD', '')),
+            'host' => env('DB_HOST', 'localhost'),
+            'port' => env('DB_PORT', '1433'),
+            'database' => env('DB_DATABASE', 'CSP_345844_BurkhartPeterson'),
+            'username' => env('DB_USERNAME', 'root'),
+            'password' => env('DB_PASSWORD', ''),
             'charset' => env('DB_CHARSET', 'utf8'),
             'prefix' => '',
             'prefix_indexes' => true,
