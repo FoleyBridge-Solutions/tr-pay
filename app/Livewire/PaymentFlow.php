@@ -19,11 +19,11 @@ use Illuminate\Support\Facades\Log;
 class PaymentFlow extends Component
 {
         // Step tracking - now using named steps
-        public string $currentStep = 'account-type'; // Steps::ACCOUNT_TYPE
+        public string $currentStep = 'verify-account'; // Start directly at verification
         public array $stepHistory = []; // Stack of previous steps for back navigation
         
-        // Step 1: Account Type
-        public $accountType = null; // 'business' or 'personal'
+        // Account Type - Always default to 'personal' (business clients are grouped)
+        public $accountType = 'personal';
         
         // Step 2: Identification
         public $last4 = '';
@@ -179,34 +179,21 @@ class PaymentFlow extends Component
     }
 
     /**
-     * Step 2: Verify account
+     * Step 1: Verify account (always personal - business clients are grouped)
      */
     public function verifyAccount()
     {
-        // Validation
-        if ($this->accountType === 'business') {
-            $this->validate([
-                'last4' => 'required|digits:4',
-                'businessName' => 'required|string|max:250',
-            ], [
-                'last4.required' => 'Please enter the last 4 digits of your EIN',
-                'last4.digits' => 'EIN must be exactly 4 digits',
-                'businessName.required' => 'Please enter your business name',
-            ]);
-            
-            $searchName = $this->businessName;
-        } else {
-            $this->validate([
-                'last4' => 'required|digits:4',
-                'lastName' => 'required|string|max:100',
-            ], [
-                'last4.required' => 'Please enter the last 4 digits of your SSN',
-                'last4.digits' => 'SSN must be exactly 4 digits',
-                'lastName.required' => 'Please enter your last name',
-            ]);
-            
-            $searchName = $this->lastName;
-        }
+        // Always validate as personal account
+        $this->validate([
+            'last4' => 'required|digits:4',
+            'lastName' => 'required|string|max:100',
+        ], [
+            'last4.required' => 'Please enter the last 4 digits of your SSN',
+            'last4.digits' => 'SSN must be exactly 4 digits',
+            'lastName.required' => 'Please enter your last name',
+        ]);
+        
+        $searchName = $this->lastName;
 
         // Lookup client
         $client = $this->paymentRepo->getClientByTaxIdAndName($this->last4, $searchName);

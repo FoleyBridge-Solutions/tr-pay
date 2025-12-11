@@ -17,10 +17,10 @@
     {{-- Step Content Container --}}
     <div class="space-y-6">
         
-        {{-- Account Type Selection --}}
-        @if($currentStep === Steps::ACCOUNT_TYPE)
+        {{-- Account Type Selection - REMOVED: Always default to personal --}}
+        {{-- @if($currentStep === Steps::ACCOUNT_TYPE)
             @include('livewire.payment-flow.steps.account-type')
-        @endif
+        @endif --}}
 
         {{-- Account Verification --}}
         @if($currentStep === Steps::VERIFY_ACCOUNT)

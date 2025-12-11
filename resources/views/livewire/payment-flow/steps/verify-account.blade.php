@@ -1,25 +1,20 @@
 {{--
     Step: Verify Account
     
-    User enters their identification information to verify their account.
+    User enters their personal identification information to verify their account.
+    Note: Business clients are grouped together and treated as personal accounts.
 --}}
 
 <x-payment.step 
     name="verify-account"
     title="Verify Your Account"
-    :subtitle="$accountType === 'business' ? 'Please enter your business information' : 'Please enter your personal information'"
+    subtitle="Please enter your personal information"
     :show-next="false"
     :show-back="false"
 >
     <form wire:submit.prevent="verifyAccount" class="space-y-6 max-w-md mx-auto">
         <flux:field>
-            <flux:label>
-                @if($accountType === 'business')
-                    Last 4 Digits of EIN
-                @else
-                    Last 4 Digits of SSN
-                @endif
-            </flux:label>
+            <flux:label>Last 4 Digits of SSN</flux:label>
             <flux:input 
                 wire:model="last4" 
                 placeholder="1234" 
@@ -29,57 +24,28 @@
             />
             <flux:error name="last4" />
             <flux:description>
-                @if($accountType === 'business')
-                    Example: If your EIN is 12-3456789, enter 6789
-                @else
-                    Example: If your SSN is 123-45-6789, enter 6789
-                @endif
+                Example: If your SSN is 123-45-6789, enter 6789
             </flux:description>
         </flux:field>
 
-        @if($accountType === 'business')
-            <flux:field>
-                <flux:label>Legal Business Name</flux:label>
-                <flux:input 
-                    wire:model="businessName" 
-                    placeholder="Acme Corporation, LLC" 
-                    wire:loading.attr="disabled" 
-                    wire:target="verifyAccount" 
-                />
-                <flux:error name="businessName" />
-                <flux:description>Enter exactly as shown on tax documents</flux:description>
-            </flux:field>
-        @else
-            <flux:field>
-                <flux:label>Last Name</flux:label>
-                <flux:input 
-                    wire:model="lastName" 
-                    placeholder="Smith" 
-                    wire:loading.attr="disabled" 
-                    wire:target="verifyAccount" 
-                />
-                <flux:error name="lastName" />
-                <flux:description>Enter as shown on your account</flux:description>
-            </flux:field>
-        @endif
+        <flux:field>
+            <flux:label>Last Name</flux:label>
+            <flux:input 
+                wire:model="lastName" 
+                placeholder="Smith" 
+                wire:loading.attr="disabled" 
+                wire:target="verifyAccount" 
+            />
+            <flux:error name="lastName" />
+            <flux:description>Enter as shown on your account</flux:description>
+        </flux:field>
 
         {{-- Custom footer for this step --}}
         <div class="flex gap-3 pt-4">
             <flux:button 
-                variant="ghost" 
-                wire:click="goToPrevious"
-                wire:loading.attr="disabled" 
-                wire:target="verifyAccount"
-            >
-                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-                </svg>
-                Back
-            </flux:button>
-            <flux:button 
                 type="submit"
                 variant="primary"
-                class="flex-1"
+                class="w-full"
                 wire:loading.attr="disabled" 
                 wire:target="verifyAccount"
             >
