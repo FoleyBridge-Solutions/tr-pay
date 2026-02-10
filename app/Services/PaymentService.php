@@ -748,7 +748,7 @@ class PaymentService
             // Create the payment plan record
             $paymentPlan = PaymentPlan::create([
                 'customer_id' => $customer->id,
-                'client_key' => $clientInfo['client_id'],
+                'client_id' => $clientInfo['client_id'],
                 'plan_id' => $planId,
                 'invoice_amount' => $invoiceAmount,
                 'plan_fee' => $planFee,
@@ -781,7 +781,7 @@ class PaymentService
 
             Payment::create([
                 'customer_id' => $customer->id,
-                'client_key' => $clientInfo['client_id'],
+                'client_id' => $clientInfo['client_id'],
                 'payment_plan_id' => $paymentPlan->id,
                 'transaction_id' => $downPaymentResult['transaction_id'],
                 'amount' => $downPayment,
@@ -925,7 +925,7 @@ class PaymentService
 
         return Payment::create([
             'customer_id' => $customer->id,
-            'client_key' => $clientInfo['client_id'],
+            'client_id' => $clientInfo['client_id'],
             'transaction_id' => $transactionId,
             'amount' => $amount,
             'fee' => $fee,

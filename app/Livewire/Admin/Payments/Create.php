@@ -626,7 +626,7 @@ class Create extends Component
         $payment = Payment::create([
             'transaction_id' => $this->transactionId,
             'customer_id' => $customer->id,
-            'client_key' => $this->selectedClient['client_id'],
+            'client_id' => $this->selectedClient['client_id'],
             'amount' => $baseAmount,
             'fee' => $fee,
             'total_amount' => Money::addDollars($baseAmount, $fee),
@@ -892,7 +892,7 @@ class Create extends Component
         $payment = Payment::create([
             'customer_id' => $customer->id,
             'transaction_id' => $this->transactionId,
-            'client_key' => $this->selectedClient['client_id'],
+            'client_id' => $this->selectedClient['client_id'],
             'amount' => $baseAmount,
             'fee' => $fee,
             'total_amount' => Money::addDollars($baseAmount, $fee),

@@ -76,7 +76,7 @@ class AchFileService
             'individual_id' => substr($individualId ?? $payment?->id ?? '', 0, 15),
             'individual_name' => substr(strtoupper($name), 0, 22),
             'trace_number' => $this->generateTraceNumber($batch),
-            'client_key' => $payment?->client_key ?? $customer?->client_key,
+            'client_id' => $payment?->client_id ?? $customer?->client_id,
             'routing_number_last_four' => substr($routingNumber, -4),
             'account_number_last_four' => substr($accountNumber, -4),
             'account_type' => strtolower($accountType),

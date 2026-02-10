@@ -140,7 +140,6 @@ class Show extends Component
     {
         // Try to find a customer record to get the client name
         $customer = Customer::where('client_id', $this->clientId)
-            ->orWhere('client_key', $this->clientId)
             ->first();
 
         if ($customer) {
@@ -168,11 +167,6 @@ class Show extends Component
         // Find customer by client_id (the Practice client_id stored in our Customer table)
         $customer = Customer::where('client_id', $this->clientId)->first();
 
-        // Also try client_key field which may store the client_id in some records
-        if (! $customer) {
-            $customer = Customer::where('client_key', $this->clientId)->first();
-        }
-
         if ($customer) {
             $this->paymentMethods = $this->paymentMethodService->getPaymentMethods($customer);
         } else {
@@ -185,8 +179,8 @@ class Show extends Component
      */
     protected function loadPayments(): void
     {
-        // Payments are stored with client_key field containing the client_id value
-        $this->payments = Payment::where('client_key', $this->clientId)
+        // Payments are stored with client_id field
+        $this->payments = Payment::where('client_id', $this->clientId)
             ->orderBy('created_at', 'desc')
             ->take(20)
             ->get();
@@ -208,8 +202,8 @@ class Show extends Component
      */
     protected function loadPaymentPlans(): void
     {
-        // PaymentPlans use client_key field which may contain client_id
-        $this->paymentPlans = PaymentPlan::where('client_key', $this->clientId)
+        // PaymentPlans use client_id field
+        $this->paymentPlans = PaymentPlan::where('client_id', $this->clientId)
             ->orderBy('created_at', 'desc')
             ->get();
     }
@@ -265,7 +259,6 @@ class Show extends Component
 
         // Find the matching CustomerPaymentMethod by token
         $customer = Customer::where('client_id', $this->clientId)
-            ->orWhere('client_key', $this->clientId)
             ->first();
 
         if ($customer) {

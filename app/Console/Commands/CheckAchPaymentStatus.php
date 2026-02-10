@@ -111,7 +111,7 @@ class CheckAchPaymentStatus extends Command
                 // Look up a customer to use the AchBillable trait
                 $customer = $payment->customer;
                 if (! $customer) {
-                    $customer = Customer::where('client_key', $payment->client_key)->first();
+                    $customer = Customer::where('client_id', $payment->client_id)->first();
                 }
 
                 if (! $customer) {

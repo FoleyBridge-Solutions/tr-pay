@@ -69,7 +69,7 @@ class ProcessScheduledSinglePayment implements ShouldQueue
 
         $metadata = $this->payment->metadata ?? [];
         $paymentMethodToken = $metadata['payment_method_token'] ?? null;
-        $clientId = $this->payment->client_key; // Column stores client_id values
+        $clientId = $this->payment->client_id;
 
         if (! $paymentMethodToken) {
             $this->handleFailure('No payment method token found');
@@ -218,7 +218,7 @@ class ProcessScheduledSinglePayment implements ShouldQueue
         $invoices = $metadata['invoices'] ?? [];
 
         // Resolve client_KEY from client_id for PracticeCS posting
-        $clientId = $this->payment->client_key; // Column stores client_id values
+        $clientId = $this->payment->client_id;
         $paymentRepo = app(\App\Repositories\PaymentRepository::class);
         $clientKey = $paymentRepo->resolveClientKey($clientId);
 

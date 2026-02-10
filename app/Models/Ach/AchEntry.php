@@ -29,7 +29,7 @@ use Illuminate\Support\Facades\Crypt;
  * @property string $trace_number
  * @property bool $has_addenda
  * @property string|null $addenda_info
- * @property string|null $client_key
+ * @property string|null $client_id
  * @property string|null $routing_number_last_four
  * @property string|null $account_number_last_four
  * @property string $account_type
@@ -80,7 +80,7 @@ class AchEntry extends Model
         'trace_number',
         'has_addenda',
         'addenda_info',
-        'client_key',
+        'client_id',
         'routing_number_last_four',
         'account_number_last_four',
         'account_type',

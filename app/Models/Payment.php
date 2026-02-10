@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *
  * @property int $id
  * @property int $customer_id
- * @property string $client_key
+ * @property string $client_id
  * @property int|null $payment_plan_id
  * @property string $transaction_id
  * @property float $amount
@@ -57,7 +57,7 @@ class Payment extends Model
      */
     protected $fillable = [
         'customer_id',
-        'client_key',
+        'client_id',
         'payment_plan_id',
         'recurring_payment_id',
         'transaction_id',

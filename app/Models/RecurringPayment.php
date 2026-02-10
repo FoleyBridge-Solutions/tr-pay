@@ -247,7 +247,7 @@ class RecurringPayment extends Model
 
         $payment = $this->payments()->create([
             'customer_id' => $this->customer_id,
-            'client_key' => $this->client_id,
+            'client_id' => $this->client_id,
             'transaction_id' => $transactionId,
             'amount' => $amount,
             'fee' => 0,
@@ -288,7 +288,7 @@ class RecurringPayment extends Model
     {
         $payment = $this->payments()->create([
             'customer_id' => $this->customer_id,
-            'client_key' => $this->client_id,
+            'client_id' => $this->client_id,
             'transaction_id' => 'failed_recurring_'.bin2hex(random_bytes(16)),
             'amount' => $this->amount,
             'fee' => 0,

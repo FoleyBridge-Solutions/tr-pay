@@ -24,7 +24,7 @@ use Illuminate\Support\Facades\Log;
  *
  * @property int $id
  * @property int $customer_id
- * @property int $client_key
+ * @property string $client_id
  * @property string $plan_id
  * @property float $invoice_amount
  * @property float $plan_fee
@@ -68,7 +68,7 @@ class PaymentPlan extends Model
      */
     protected $fillable = [
         'customer_id',
-        'client_key',
+        'client_id',
         'plan_id',
         'invoice_amount',
         'plan_fee',
@@ -249,7 +249,7 @@ class PaymentPlan extends Model
         // Create the payment record
         $payment = $this->payments()->create([
             'customer_id' => $this->customer_id,
-            'client_key' => $this->client_key,
+            'client_id' => $this->client_id,
             'transaction_id' => $transactionId,
             'amount' => $amount,
             'fee' => 0,
@@ -304,7 +304,7 @@ class PaymentPlan extends Model
         // Create a failed payment record
         $payment = $this->payments()->create([
             'customer_id' => $this->customer_id,
-            'client_key' => $this->client_key,
+            'client_id' => $this->client_id,
             'transaction_id' => 'failed_'.bin2hex(random_bytes(16)),
             'amount' => $this->monthly_payment,
             'fee' => 0,
@@ -448,7 +448,7 @@ class PaymentPlan extends Model
 
             $this->payments()->create([
                 'customer_id' => $this->customer_id,
-                'client_key' => $this->client_key,
+                'client_id' => $this->client_id,
                 'transaction_id' => 'scheduled_'.$this->plan_id.'_'.$i,
                 'amount' => $amount,
                 'fee' => 0,

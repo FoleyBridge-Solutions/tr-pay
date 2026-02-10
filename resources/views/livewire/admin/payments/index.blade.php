@@ -71,7 +71,7 @@
                                 @php
                                     $metadata = $payment->metadata ?? [];
                                     $clientName = $metadata['client_name'] ?? $payment->customer?->name ?? null;
-                                    $clientId = $metadata['client_id'] ?? $payment->client_key ?? null;
+                                    $clientId = $metadata['client_id'] ?? $payment->client_id ?? null;
                                 @endphp
                                 @if($clientName && $clientId)
                                     <a href="{{ route('admin.clients.show', $clientId) }}" class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:underline">
@@ -155,7 +155,7 @@
                     @php
                         $metadata = $selectedPayment->metadata ?? [];
                         $clientName = $metadata['client_name'] ?? $selectedPayment->customer?->name ?? null;
-                        $clientId = $metadata['client_id'] ?? $selectedPayment->client_key ?? null;
+                        $clientId = $metadata['client_id'] ?? $selectedPayment->client_id ?? null;
                     @endphp
                     @if($clientName || $clientId)
                         <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">

@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Log;
 /**
  * Backfill client_id values in Payment and PaymentPlan records.
  *
- * The `client_key` column in both tables previously stored PracticeCS
+ * The `client_id` column in both tables previously stored PracticeCS
  * `client_KEY` (integer surrogate key) values. This command resolves
  * each to the human-readable `client_id` value from PracticeCS and
  * updates the records.
@@ -35,7 +35,7 @@ class BackfillClientIds extends Command
      *
      * @var string
      */
-    protected $description = 'Update Payment and PaymentPlan client_key columns from PracticeCS client_KEY to client_id';
+    protected $description = 'Update Payment and PaymentPlan client_id columns from PracticeCS client_KEY to client_id';
 
     /**
      * Execute the console command.
@@ -95,7 +95,7 @@ class BackfillClientIds extends Command
     }
 
     /**
-     * Backfill client_key values for a given model.
+     * Backfill client_id values for a given model.
      *
      * @param  class-string  $modelClass
      * @param  array<string, string>  $keyToIdMap  Mapping of client_KEY => client_id
@@ -106,17 +106,17 @@ class BackfillClientIds extends Command
     {
         $stats = ['total' => 0, 'updated' => 0, 'already_correct' => 0, 'not_found' => 0, 'null' => 0];
 
-        $records = $modelClass::whereNotNull('client_key')->get();
+        $records = $modelClass::whereNotNull('client_id')->get();
         $stats['total'] = $records->count();
 
-        $nullRecords = $modelClass::whereNull('client_key')->count();
+        $nullRecords = $modelClass::whereNull('client_id')->count();
         $stats['null'] = $nullRecords;
         $stats['total'] += $nullRecords;
 
-        $this->info("Found {$records->count()} records with client_key values ({$nullRecords} with null).");
+        $this->info("Found {$records->count()} records with client_id values ({$nullRecords} with null).");
 
         foreach ($records as $record) {
-            $currentValue = (string) $record->client_key;
+            $currentValue = (string) $record->client_id;
 
             // If the value is NOT purely numeric, it's already a client_id — skip
             if (! ctype_digit($currentValue)) {
@@ -146,7 +146,7 @@ class BackfillClientIds extends Command
             if ($dryRun) {
                 $this->line("  Record #{$record->id}: {$currentValue} => {$clientId}");
             } else {
-                $record->client_key = $clientId;
+                $record->client_id = $clientId;
                 $record->save();
             }
 
