@@ -4,11 +4,11 @@
 
 namespace App\Console\Commands;
 
+use Exception;
+use FoleyBridgeSolutions\MiPaymentChoiceCashier\Services\ApiClient;
+use FoleyBridgeSolutions\MiPaymentChoiceCashier\Services\QuickPaymentsService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
-use MiPaymentChoice\Cashier\Services\ApiClient;
-use MiPaymentChoice\Cashier\Services\QuickPaymentsService;
-use Exception;
 use ReflectionClass;
 
 class MpcHealthCheckCommand extends Command
@@ -29,8 +29,6 @@ class MpcHealthCheckCommand extends Command
 
     /**
      * Execute the console command.
-     *
-     * @return int
      */
     public function handle(): int
     {
@@ -49,7 +47,7 @@ class MpcHealthCheckCommand extends Command
         // Test 1: Configuration
         $this->info('1. Configuration Check:');
         $config = config('mipaymentchoice');
-        
+
         $this->checkValue('Username', $config['username']);
         $this->checkValue('Password', $config['password']);
         $this->checkValue('Merchant Key', $config['merchant_key']);
@@ -64,15 +62,15 @@ class MpcHealthCheckCommand extends Command
             $reflection = new ReflectionClass($api);
             $method = $reflection->getMethod('getBearerToken');
             $method->setAccessible(true);
-            
+
             $startTime = microtime(true);
             $token = $method->invoke($api);
             $duration = round((microtime(true) - $startTime) * 1000, 2);
-            
-            $this->line("   <fg=green>✓</> Token retrieved (" . strlen($token) . " chars) in {$duration}ms");
-            $this->line("   Token preview: " . substr($token, 0, 50) . "...");
+
+            $this->line('   <fg=green>✓</> Token retrieved ('.strlen($token)." chars) in {$duration}ms");
+            $this->line('   Token preview: '.substr($token, 0, 50).'...');
         } catch (Exception $e) {
-            $this->line("   <fg=red>✗</> Failed: " . $e->getMessage());
+            $this->line('   <fg=red>✗</> Failed: '.$e->getMessage());
             $allPassed = false;
         }
         $this->newLine();
@@ -81,9 +79,9 @@ class MpcHealthCheckCommand extends Command
         $this->info('3. QuickPayments Service:');
         try {
             $qpService = app(QuickPaymentsService::class);
-            $this->line("   <fg=green>✓</> Service initialized");
+            $this->line('   <fg=green>✓</> Service initialized');
         } catch (Exception $e) {
-            $this->line("   <fg=red>✗</> Failed: " . $e->getMessage());
+            $this->line('   <fg=red>✗</> Failed: '.$e->getMessage());
             $allPassed = false;
         }
         $this->newLine();
@@ -92,9 +90,9 @@ class MpcHealthCheckCommand extends Command
         $this->info('4. Cache Status:');
         $cached = Cache::has('mipaymentchoice_bearer_token');
         if ($cached) {
-            $this->line("   <fg=green>✓</> Bearer token is cached");
+            $this->line('   <fg=green>✓</> Bearer token is cached');
         } else {
-            $this->line("   <fg=yellow>⚠</> Bearer token is not cached (will be cached on first use)");
+            $this->line('   <fg=yellow>⚠</> Bearer token is not cached (will be cached on first use)');
         }
         $this->newLine();
 
@@ -102,10 +100,12 @@ class MpcHealthCheckCommand extends Command
         if ($allPassed) {
             $this->info('✓✓✓ ALL CHECKS PASSED ✓✓✓');
             $this->info('Payment integration is working correctly.');
+
             return Command::SUCCESS;
         } else {
             $this->error('✗✗✗ SOME CHECKS FAILED ✗✗✗');
             $this->error('Please review the errors above and check your configuration.');
+
             return Command::FAILURE;
         }
     }
@@ -113,9 +113,7 @@ class MpcHealthCheckCommand extends Command
     /**
      * Check and display a configuration value.
      *
-     * @param string $name
-     * @param mixed $value
-     * @return void
+     * @param  mixed  $value
      */
     protected function checkValue(string $name, $value): void
     {
@@ -123,7 +121,7 @@ class MpcHealthCheckCommand extends Command
             $this->line("   <fg=red>✗</> {$name}: <fg=red>Missing</>");
         } else {
             // Mask sensitive values
-            $displayValue = in_array(strtolower($name), ['password', 'key']) 
+            $displayValue = in_array(strtolower($name), ['password', 'key'])
                 ? str_repeat('*', min(strlen($value), 8))
                 : $value;
             $this->line("   <fg=green>✓</> {$name}: {$displayValue}");

@@ -6,19 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * Contact Model
- * 
- * Represents a contact in the Practice CS system
- * 
- * ⚠️⚠️⚠️ CRITICAL: This model reads from Microsoft SQL Server (READ-ONLY!)
- * This database belongs to ANOTHER APPLICATION. We can ONLY READ data.
+ *
+ * Represents a contact in the PracticeCS SQL Server database.
  */
 class Contact extends Model
 {
     /**
-     * ⚠️ CRITICAL: READ-ONLY connection to external SQL Server database
+     * Connects to the PracticeCS SQL Server database.
      */
     protected $connection = 'sqlsrv';
-    
+
     /**
      * The table associated with the model.
      */

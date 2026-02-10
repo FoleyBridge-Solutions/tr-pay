@@ -6,21 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * Client Model
- * 
- * Represents a client in the Practice CS system
- * 
- * ⚠️⚠️⚠️ CRITICAL: This model reads from Microsoft SQL Server (READ-ONLY!)
- * This database belongs to ANOTHER APPLICATION. We can ONLY READ data.
- * NEVER attempt to create, update, or delete records using this model!
+ *
+ * Represents a client in the PracticeCS SQL Server database.
  */
 class Client extends Model
 {
     /**
-     * ⚠️ CRITICAL: This connects to the READ-ONLY SQL Server database
-     * owned by another application. NEVER write to this database!
+     * Connects to the PracticeCS SQL Server database.
      */
     protected $connection = 'sqlsrv';
-    
+
     /**
      * The table associated with the model.
      */

@@ -13,7 +13,9 @@
         "livewire/flux": "^2.6",
         "livewire/flux-pro": "^2.6",
         "livewire/livewire": "^3.6",
-        "mipaymentchoice/cashier": "dev-main",
+        "foleybridgesolutions/mipaymentchoice-cashier": "dev-main",
+        "foleybridgesolutions/kotapay-cashier": "dev-main",
+        "phpoffice/phpspreadsheet": "^5.4",
         "stripe/stripe-php": "^19.0"
     },
     "require-dev": {
@@ -95,9 +97,13 @@
             "type": "composer",
             "url": "https://composer.fluxui.dev"
         },
-        "mipaymentchoice-cashier": {
+        "foleybridgesolutions/mipaymentchoice-cashier": {
             "type": "vcs",
             "url": "https://github.com/o-psi/mipaymentchoice-cashier"
+        },
+        "foleybridgesolutions/kotapay-cashier": {
+            "type": "vcs",
+            "url": "https://github.com/FoleyBridge-Solutions/kotapay-cashier"
         }
     }
 }

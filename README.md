@@ -92,7 +92,7 @@ APP_NAME="TR Pay"
 # SQLite (Local payment data)
 DB_CONNECTION=sqlite
 
-# MS SQL Server (Read-only client/invoice data)
+# MS SQL Server (PracticeCS client/invoice data)
 SQLSRV_HOST=your_server
 SQLSRV_DATABASE=your_database
 SQLSRV_USERNAME=your_username
@@ -140,7 +140,7 @@ See [TESTING.md](TESTING.md) for detailed testing documentation.
 
 - SSN/EIN + Name verification
 - Session-based state management
-- SQL Server integration (read-only)
+- PracticeCS SQL Server integration
 - SQLite for local payment data
 - MiPaymentChoice secure payment processing
 - IP address tracking for acceptance records
@@ -155,7 +155,7 @@ See [TESTING.md](TESTING.md) for detailed testing documentation.
 ## 📊 Database Architecture
 
 - **SQLite** - Local storage for customers, project acceptances, payment methods
-- **MS SQL Server** - Read-only access to clients, invoices, engagements
+- **MS SQL Server** - PracticeCS clients, invoices, engagements
 
 ## 📚 Documentation
 

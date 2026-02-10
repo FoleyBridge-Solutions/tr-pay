@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Log;
  * PracticeCsPaymentWriter
  *
  * Writes payment data to PracticeCS SQL Server database
- * 
+ *
  * CRITICAL: This service WRITES to the PracticeCS database
  * Only use when payment integration is enabled
  */
@@ -19,14 +19,13 @@ class PracticeCsPaymentWriter
 {
     /**
      * Write a payment to PracticeCS
-     * 
-     * @param array $paymentData
+     *
      * @return array ['success' => bool, 'ledger_entry_KEY' => int|null, 'error' => string|null]
      */
     public function writePayment(array $paymentData): array
     {
         // Verify payment integration is enabled
-        if (!config('practicecs.payment_integration.enabled')) {
+        if (! config('practicecs.payment_integration.enabled')) {
             return [
                 'success' => false,
                 'error' => 'PracticeCS payment integration is disabled',
@@ -40,12 +39,12 @@ class PracticeCsPaymentWriter
 
             // Step 1: Generate next primary key (with locking)
             $nextLedgerKey = DB::connection($connection)->selectOne(
-                "SELECT ISNULL(MAX(ledger_entry_KEY), 0) + 1 AS next_key FROM Ledger_Entry WITH (TABLOCKX)"
+                'SELECT ISNULL(MAX(ledger_entry_KEY), 0) + 1 AS next_key FROM Ledger_Entry WITH (TABLOCKX)'
             )->next_key;
 
             // Step 2: Generate next entry number
             $nextEntryNumber = DB::connection($connection)->selectOne(
-                "SELECT ISNULL(MAX(entry_number), 0) + 1 AS next_num FROM Ledger_Entry"
+                'SELECT ISNULL(MAX(entry_number), 0) + 1 AS next_num FROM Ledger_Entry'
             )->next_num;
 
             // Step 3: Validate foreign keys exist
@@ -54,7 +53,7 @@ class PracticeCsPaymentWriter
             // Step 4: Insert Ledger_Entry
             $entryDate = now()->startOfDay(); // Must be midnight per CHECK constraint
 
-            DB::connection($connection)->insert("
+            DB::connection($connection)->insert('
                 INSERT INTO Ledger_Entry (
                     ledger_entry_KEY,
                     update__staff_KEY,
@@ -77,7 +76,7 @@ class PracticeCsPaymentWriter
                     ledger_entry_subtype_KEY
                 )
                 VALUES (?, ?, GETUTCDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(GETDATE() AS DATE), ?, CAST(GETDATE() AS DATE), ?, ?, GETUTCDATE(), ?)
-            ", [
+            ', [
                 $nextLedgerKey,
                 $paymentData['staff_KEY'],
                 $paymentData['bank_account_KEY'],
@@ -102,7 +101,7 @@ class PracticeCsPaymentWriter
             ]);
 
             // Step 5: Apply payment to invoices
-            if (!empty($paymentData['invoices'])) {
+            if (! empty($paymentData['invoices'])) {
                 $this->applyPaymentToInvoices(
                     $connection,
                     $nextLedgerKey,
@@ -156,47 +155,47 @@ class PracticeCsPaymentWriter
     {
         // Validate client
         $client = DB::connection($connection)->selectOne(
-            "SELECT 1 AS found FROM Client WHERE client_KEY = ?",
+            'SELECT 1 AS found FROM Client WHERE client_KEY = ?',
             [$paymentData['client_KEY']]
         );
-        if (!$client) {
+        if (! $client) {
             throw new \Exception("Client not found: {$paymentData['client_KEY']}");
         }
 
         // Validate staff
         $staff = DB::connection($connection)->selectOne(
-            "SELECT 1 AS found FROM Staff WHERE staff_KEY = ?",
+            'SELECT 1 AS found FROM Staff WHERE staff_KEY = ?',
             [$paymentData['staff_KEY']]
         );
-        if (!$staff) {
+        if (! $staff) {
             throw new \Exception("Staff not found: {$paymentData['staff_KEY']}");
         }
 
         // Validate bank account
         $bankAccount = DB::connection($connection)->selectOne(
-            "SELECT 1 AS found FROM Bank_Account WHERE bank_account_KEY = ?",
+            'SELECT 1 AS found FROM Bank_Account WHERE bank_account_KEY = ?',
             [$paymentData['bank_account_KEY']]
         );
-        if (!$bankAccount) {
+        if (! $bankAccount) {
             throw new \Exception("Bank account not found: {$paymentData['bank_account_KEY']}");
         }
 
         // Validate ledger type
         $ledgerType = DB::connection($connection)->selectOne(
-            "SELECT 1 AS found FROM Ledger_Entry_Type WHERE ledger_entry_type_KEY = ?",
+            'SELECT 1 AS found FROM Ledger_Entry_Type WHERE ledger_entry_type_KEY = ?',
             [$paymentData['ledger_type_KEY']]
         );
-        if (!$ledgerType) {
+        if (! $ledgerType) {
             throw new \Exception("Ledger type not found: {$paymentData['ledger_type_KEY']}");
         }
 
         // Validate subtype (only if provided - memos may not have subtypes)
-        if (!empty($paymentData['subtype_KEY'])) {
+        if (! empty($paymentData['subtype_KEY'])) {
             $subtype = DB::connection($connection)->selectOne(
-                "SELECT 1 AS found FROM Ledger_Entry_Subtype WHERE ledger_entry_subtype_KEY = ?",
+                'SELECT 1 AS found FROM Ledger_Entry_Subtype WHERE ledger_entry_subtype_KEY = ?',
                 [$paymentData['subtype_KEY']]
             );
-            if (!$subtype) {
+            if (! $subtype) {
                 throw new \Exception("Ledger subtype not found: {$paymentData['subtype_KEY']}");
             }
         }
@@ -204,15 +203,14 @@ class PracticeCsPaymentWriter
 
     /**
      * Write a memo (debit or credit) to PracticeCS
-     * 
-     * @param array $memoData
-     * @param string $memoType 'debit' or 'credit'
+     *
+     * @param  string  $memoType  'debit' or 'credit'
      * @return array ['success' => bool, 'ledger_entry_KEY' => int|null, 'error' => string|null]
      */
     public function writeMemo(array $memoData, string $memoType): array
     {
         // Verify payment integration is enabled
-        if (!config('practicecs.payment_integration.enabled')) {
+        if (! config('practicecs.payment_integration.enabled')) {
             return [
                 'success' => false,
                 'error' => 'PracticeCS payment integration is disabled',
@@ -220,10 +218,10 @@ class PracticeCsPaymentWriter
         }
 
         $connection = config('practicecs.payment_integration.connection', 'sqlsrv');
-        
+
         // Get memo type KEY from config
         $ledgerTypeKey = config("practicecs.payment_integration.memo_types.{$memoType}");
-        if (!$ledgerTypeKey) {
+        if (! $ledgerTypeKey) {
             return [
                 'success' => false,
                 'error' => "Invalid memo type: {$memoType}",
@@ -235,11 +233,11 @@ class PracticeCsPaymentWriter
 
             // Generate next keys
             $nextLedgerKey = DB::connection($connection)->selectOne(
-                "SELECT ISNULL(MAX(ledger_entry_KEY), 0) + 1 AS next_key FROM Ledger_Entry WITH (TABLOCKX)"
+                'SELECT ISNULL(MAX(ledger_entry_KEY), 0) + 1 AS next_key FROM Ledger_Entry WITH (TABLOCKX)'
             )->next_key;
 
             $nextEntryNumber = DB::connection($connection)->selectOne(
-                "SELECT ISNULL(MAX(entry_number), 0) + 1 AS next_num FROM Ledger_Entry"
+                'SELECT ISNULL(MAX(entry_number), 0) + 1 AS next_num FROM Ledger_Entry'
             )->next_num;
 
             // Validate foreign keys
@@ -247,15 +245,15 @@ class PracticeCsPaymentWriter
 
             // Insert memo entry
             $entryDate = now()->startOfDay();
-            
+
             // Memos: amount should be positive in parameter, sign determined by ledger type
             // Debit Memo (type 3): positive amount (increases AR)
-            // Credit Memo (type 5): negative amount (decreases AR) 
-            $amount = $memoType === 'debit' 
+            // Credit Memo (type 5): negative amount (decreases AR)
+            $amount = $memoType === 'debit'
                 ? abs($memoData['amount'])   // Debit: positive
                 : -abs($memoData['amount']);  // Credit: negative
 
-            DB::connection($connection)->insert("
+            DB::connection($connection)->insert('
                 INSERT INTO Ledger_Entry (
                     ledger_entry_KEY,
                     update__staff_KEY,
@@ -278,7 +276,7 @@ class PracticeCsPaymentWriter
                     ledger_entry_subtype_KEY
                 )
                 VALUES (?, ?, GETUTCDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(GETDATE() AS DATE), ?, CAST(GETDATE() AS DATE), ?, ?, GETUTCDATE(), ?)
-            ", [
+            ', [
                 $nextLedgerKey,
                 $memoData['staff_KEY'],
                 $memoData['bank_account_KEY'],
@@ -305,7 +303,7 @@ class PracticeCsPaymentWriter
             ]);
 
             // Apply memo to invoices if provided
-            if (!empty($memoData['invoices'])) {
+            if (! empty($memoData['invoices'])) {
                 $this->applyPaymentToInvoices(
                     $connection,
                     $nextLedgerKey,
@@ -348,29 +346,26 @@ class PracticeCsPaymentWriter
 
     /**
      * Apply payment to invoices
-     * 
-     * @param string $connection
-     * @param int $paymentLedgerKey
-     * @param array $invoices [['ledger_entry_KEY' => int, 'amount' => float], ...]
-     * @param int $staffKey
+     *
+     * @param  array  $invoices  [['ledger_entry_KEY' => int, 'amount' => float], ...]
      */
     protected function applyPaymentToInvoices(string $connection, int $paymentLedgerKey, array $invoices, int $staffKey): void
     {
         foreach ($invoices as $invoice) {
             // Verify invoice exists and is posted, get its type and total amount
             $invoiceEntry = DB::connection($connection)->selectOne(
-                "SELECT ledger_entry_KEY, ledger_entry_type_KEY, amount 
+                'SELECT ledger_entry_KEY, ledger_entry_type_KEY, amount 
                  FROM Ledger_Entry 
-                 WHERE ledger_entry_KEY = ? AND posted__staff_KEY IS NOT NULL",
+                 WHERE ledger_entry_KEY = ? AND posted__staff_KEY IS NOT NULL',
                 [$invoice['ledger_entry_KEY']]
             );
 
-            if (!$invoiceEntry) {
+            if (! $invoiceEntry) {
                 throw new \Exception("Invoice not found or not posted: {$invoice['ledger_entry_KEY']}");
             }
 
             // CRITICAL: from = INVOICE, to = PAYMENT
-            DB::connection($connection)->insert("
+            DB::connection($connection)->insert('
                 INSERT INTO Ledger_Entry_Application (
                     update__staff_KEY,
                     update_date_utc,
@@ -380,7 +375,7 @@ class PracticeCsPaymentWriter
                     create_date_utc
                 )
                 VALUES (?, GETUTCDATE(), ?, ?, ?, GETUTCDATE())
-            ", [
+            ', [
                 $staffKey,
                 $invoice['ledger_entry_KEY'], // FROM = Invoice
                 $paymentLedgerKey, // TO = Payment
@@ -410,17 +405,16 @@ class PracticeCsPaymentWriter
 
     /**
      * Insert Billing_Decision_Collection entries for a payment applied to an invoice
-     * 
+     *
      * This is CRITICAL for PracticeCS to recognize the invoice as paid.
      * The BDC table links the payment to the individual time/expense entries
      * (sheet_entry_KEY) that make up the invoice.
-     * 
-     * @param string $connection
-     * @param int $collectionSourceKey The payment or credit memo ledger_entry_KEY
-     * @param int $invoiceKey The invoice ledger_entry_KEY being paid
-     * @param float $appliedAmount Amount being applied to this invoice
-     * @param float $invoiceTotal Total invoice amount (for proportional distribution)
-     * @param int $staffKey Staff KEY for audit trail
+     *
+     * @param  int  $collectionSourceKey  The payment or credit memo ledger_entry_KEY
+     * @param  int  $invoiceKey  The invoice ledger_entry_KEY being paid
+     * @param  float  $appliedAmount  Amount being applied to this invoice
+     * @param  float  $invoiceTotal  Total invoice amount (for proportional distribution)
+     * @param  int  $staffKey  Staff KEY for audit trail
      */
     protected function insertBillingDecisionCollection(
         string $connection,
@@ -432,9 +426,9 @@ class PracticeCsPaymentWriter
     ): void {
         // Get all Billing_Decision entries for this invoice
         $billingDecisions = DB::connection($connection)->select(
-            "SELECT sheet_entry_KEY, invoiced, bill_amount, surcharge, discount, sales_tax, service_tax
+            'SELECT sheet_entry_KEY, invoiced, bill_amount, surcharge, discount, sales_tax, service_tax
              FROM Billing_Decision 
-             WHERE ledger_entry_KEY = ?",
+             WHERE ledger_entry_KEY = ?',
             [$invoiceKey]
         );
 
@@ -442,6 +436,7 @@ class PracticeCsPaymentWriter
             Log::warning('PracticeCS: No Billing_Decision entries found for invoice', [
                 'invoice_KEY' => $invoiceKey,
             ]);
+
             return;
         }
 
@@ -465,12 +460,12 @@ class PracticeCsPaymentWriter
             $discountCollected = round(($bd->discount ?? 0) * $ratio, 2);
             $salesTaxCollected = round(($bd->sales_tax ?? 0) * $ratio, 2);
             $serviceTaxCollected = round(($bd->service_tax ?? 0) * $ratio, 2);
-            
+
             // collected = bill_amount + surcharge - discount + sales_tax + service_tax
-            $collected = $billAmountCollected + $surchargeCollected - $discountCollected 
+            $collected = $billAmountCollected + $surchargeCollected - $discountCollected
                        + $salesTaxCollected + $serviceTaxCollected;
 
-            DB::connection($connection)->insert("
+            DB::connection($connection)->insert('
                 INSERT INTO Billing_Decision_Collection (
                     update__staff_KEY,
                     update_date_utc,
@@ -487,7 +482,7 @@ class PracticeCsPaymentWriter
                     collected
                 )
                 VALUES (?, GETUTCDATE(), GETUTCDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ", [
+            ', [
                 $staffKey,
                 $collectionSourceKey,
                 $invoiceKey,
@@ -523,7 +518,7 @@ class PracticeCsPaymentWriter
         // Generate GUID from transaction ID
         $guid = $this->generateGuidFromString($paymentData['reference']);
 
-        DB::connection($connection)->insert("
+        DB::connection($connection)->insert('
             INSERT INTO Online_Payment (
                 ledger_entry_KEY,
                 online_payment_guid,
@@ -532,7 +527,7 @@ class PracticeCsPaymentWriter
                 create_date_utc
             )
             VALUES (?, ?, ?, GETUTCDATE(), GETUTCDATE())
-        ", [
+        ', [
             $ledgerEntryKey,
             $guid,
             $paymentData['staff_KEY'],

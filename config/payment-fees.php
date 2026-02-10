@@ -16,15 +16,15 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Credit Card Processing Fee
+    | Credit Card Non-Cash Adjustment
     |--------------------------------------------------------------------------
     |
-    | The percentage fee applied to credit card transactions.
-    | Default: 0.03 (3%)
+    | The percentage non-cash adjustment applied to credit card transactions.
+    | Default: 0.04 (4%)
     |
     */
 
-    'credit_card_rate' => (float) env('PAYMENT_CREDIT_CARD_FEE', 0.03),
+    'credit_card_rate' => (float) env('PAYMENT_CREDIT_CARD_FEE', 0.04),
 
     /*
     |--------------------------------------------------------------------------

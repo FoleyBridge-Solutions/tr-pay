@@ -6,19 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * LedgerEntry Model
- * 
- * Represents a ledger entry (invoice, payment, etc.) in Practice CS
- * 
- * ⚠️⚠️⚠️ CRITICAL: This model reads from Microsoft SQL Server (READ-ONLY!)
- * This database belongs to ANOTHER APPLICATION. We can ONLY READ data.
+ *
+ * Represents a ledger entry (invoice, payment, etc.) in PracticeCS SQL Server database.
  */
 class LedgerEntry extends Model
 {
     /**
-     * ⚠️ CRITICAL: READ-ONLY connection to external SQL Server database
+     * Connects to the PracticeCS SQL Server database.
      */
     protected $connection = 'sqlsrv';
-    
+
     /**
      * The table associated with the model.
      */

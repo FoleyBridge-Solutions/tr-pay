@@ -14,10 +14,9 @@ return [
     | the connection which will be utilized unless another connection
     | is explicitly specified when you execute a query / statement.
     |
-    | ⚠️ CRITICAL: 'sqlsrv' connection is READ-ONLY! It connects to an
-    | external Microsoft SQL Server database that we DO NOT OWN and MUST NOT
-    | modify. NEVER run migrations or create tables on 'sqlsrv' connection!
-    | Use 'sqlite' for app-specific tables (sessions, cache, migrations, etc.)
+     | The 'sqlsrv' connection points to the PracticeCS SQL Server database.
+     | Use 'sqlite' for app-specific tables (sessions, cache, migrations, etc.)
+     | NEVER run migrations or create tables on 'sqlsrv' connection!
     |
     */
 

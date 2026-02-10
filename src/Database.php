@@ -1,4 +1,5 @@
 <?php
+
 // src/Database.php
 
 namespace Fbs\Pcsre;
@@ -6,11 +7,14 @@ namespace Fbs\Pcsre;
 use PDO;
 use PDOException;
 
-class Database {
+class Database
+{
     private $pdo;
+
     private $error;
 
-    public function __construct($dbconfig) {
+    public function __construct($dbconfig)
+    {
         $host = $dbconfig['host'];
         $db = $dbconfig['dbname'];
         $user = $dbconfig['user'];
@@ -19,9 +23,9 @@ class Database {
 
         $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
         $options = [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
+            PDO::ATTR_EMULATE_PREPARES => false,
         ];
 
         try {
@@ -32,7 +36,8 @@ class Database {
         }
     }
 
-    public function getConnection() {
+    public function getConnection()
+    {
         return $this->pdo;
     }
 }

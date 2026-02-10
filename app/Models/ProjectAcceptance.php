@@ -37,7 +37,7 @@ class ProjectAcceptance extends Model
         'practicecs_updated' => 'boolean',
         'practicecs_updated_at' => 'datetime',
     ];
-    
+
     /**
      * Scope for accepted but unpaid projects
      */
@@ -45,14 +45,14 @@ class ProjectAcceptance extends Model
     {
         return $query->where('accepted', true)->where('paid', false);
     }
-    
+
     /**
      * Scope for projects that failed to sync to PracticeCS
      */
     public function scopeFailedSync($query)
     {
         return $query->where('paid', true)
-                     ->where('practicecs_updated', false)
-                     ->whereNotNull('practicecs_error');
+            ->where('practicecs_updated', false)
+            ->whereNotNull('practicecs_error');
     }
 }

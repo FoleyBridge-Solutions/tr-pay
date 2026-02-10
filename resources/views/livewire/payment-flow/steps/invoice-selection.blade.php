@@ -140,7 +140,6 @@
                                                 @if(!isset($invoice['is_placeholder']) || !$invoice['is_placeholder'])
                                                     <flux:checkbox 
                                                         value="{{ $invoice['invoice_number'] }}" 
-                                                        :checked="in_array((string)$invoice['invoice_number'], $selectedInvoices)"
                                                     />
                                                 @else
                                                     <span class="text-zinc-400 text-sm">-</span>

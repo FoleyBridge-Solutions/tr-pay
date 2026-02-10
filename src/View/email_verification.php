@@ -3,9 +3,9 @@
         <h3>Verify Your Email</h3>
     </div>
     <div class="card-body">
-        <?php if (isset($error)): ?>
+        <?php if (isset($error)) { ?>
             <div class="alert alert-danger"><?= htmlspecialchars($error); ?></div>
-        <?php endif; ?>
+        <?php } ?>
         <form method="post">
             <input type="hidden" name="step" value="email_verification">
             <div class="mb-3">

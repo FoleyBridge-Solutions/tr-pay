@@ -28,7 +28,7 @@
         @endif
 
         {{-- Project Acceptance (conditional) --}}
-        @if($currentStep === Steps::PROJECT_ACCEPTANCE && $hasProjectsToAccept && isset($pendingProjects[$currentProjectIndex]))
+        @if($currentStep === Steps::PROJECT_ACCEPTANCE && $hasEngagementsToAccept && isset($pendingEngagements[$currentEngagementIndex]))
             @include('livewire.payment-flow.steps.project-acceptance')
         @endif
 
@@ -62,6 +62,11 @@
         {{-- Payment Method Selection --}}
         @if($currentStep === Steps::PAYMENT_METHOD)
             @include('livewire.payment-flow.steps.payment-method')
+        @endif
+
+        {{-- Saved Payment Methods Selection --}}
+        @if($currentStep === Steps::SAVED_PAYMENT_METHODS)
+            @include('livewire.payment-flow.steps.saved-payment-methods')
         @endif
 
         {{-- Payment Details (One-Time Payments) --}}

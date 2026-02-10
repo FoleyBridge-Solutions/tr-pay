@@ -9,13 +9,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * Payment Model
- * 
+ *
  * Represents a payment transaction processed through this application.
  * Can be a one-time payment or part of a payment plan.
- * 
+ *
  * @property int $id
  * @property int $customer_id
- * @property int $client_key
+ * @property string $client_key
  * @property int|null $payment_plan_id
  * @property string $transaction_id
  * @property float $amount
@@ -31,6 +31,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property bool $is_automated
  * @property string|null $description
  * @property array|null $metadata
+ * @property string|null $payment_vendor
+ * @property string|null $vendor_transaction_id
  * @property \Carbon\Carbon|null $scheduled_at
  * @property \Carbon\Carbon|null $processed_at
  * @property \Carbon\Carbon|null $failed_at
@@ -39,8 +41,13 @@ class Payment extends Model
 {
     // Status constants
     public const STATUS_PENDING = 'pending';
+
+    public const STATUS_PROCESSING = 'processing';
+
     public const STATUS_COMPLETED = 'completed';
+
     public const STATUS_FAILED = 'failed';
+
     public const STATUS_REFUNDED = 'refunded';
 
     /**
@@ -52,6 +59,7 @@ class Payment extends Model
         'customer_id',
         'client_key',
         'payment_plan_id',
+        'recurring_payment_id',
         'transaction_id',
         'amount',
         'fee',
@@ -69,6 +77,8 @@ class Payment extends Model
         'scheduled_at',
         'processed_at',
         'failed_at',
+        'payment_vendor',
+        'vendor_transaction_id',
     ];
 
     /**
@@ -110,6 +120,14 @@ class Payment extends Model
     }
 
     /**
+     * Get the recurring payment this payment belongs to.
+     */
+    public function recurringPayment(): BelongsTo
+    {
+        return $this->belongsTo(RecurringPayment::class);
+    }
+
+    /**
      * Scope: Pending payments.
      */
     public function scopePending($query)
@@ -123,6 +141,14 @@ class Payment extends Model
     public function scopeCompleted($query)
     {
         return $query->where('status', self::STATUS_COMPLETED);
+    }
+
+    /**
+     * Scope: Processing payments (ACH awaiting settlement).
+     */
+    public function scopeProcessing($query)
+    {
+        return $query->where('status', self::STATUS_PROCESSING);
     }
 
     /**
@@ -176,11 +202,36 @@ class Payment extends Model
     }
 
     /**
+     * Check if this payment is processing (ACH awaiting settlement).
+     */
+    public function isProcessing(): bool
+    {
+        return $this->status === self::STATUS_PROCESSING;
+    }
+
+    /**
      * Check if this payment failed.
      */
     public function isFailed(): bool
     {
         return $this->status === self::STATUS_FAILED;
+    }
+
+    /**
+     * Mark the payment as processing (ACH submitted, awaiting settlement).
+     *
+     * @param  string  $transactionId  Internal transaction ID
+     * @param  string|null  $vendorTransactionId  Kotapay transaction ID for status lookups
+     */
+    public function markAsProcessing(string $transactionId, ?string $vendorTransactionId = null): void
+    {
+        $this->transaction_id = $transactionId;
+        $this->status = self::STATUS_PROCESSING;
+        $this->payment_vendor = 'kotapay';
+        if ($vendorTransactionId) {
+            $this->vendor_transaction_id = $vendorTransactionId;
+        }
+        $this->save();
     }
 
     /**

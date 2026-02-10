@@ -1,6 +1,3 @@
-<?php 
+<?php
 
-    header('Location: /public/payment.php');
-
-
-?>
+header('Location: /public/payment.php');

@@ -56,7 +56,7 @@
             </div>
             @if($creditCardFee > 0)
                 <div class="flex justify-between py-3 border-b border-zinc-200 dark:border-zinc-700">
-                    <flux:subheading>Credit Card Fee:</flux:subheading>
+                    <flux:subheading>Non-Cash Adjustment:</flux:subheading>
                     <flux:text>${{ number_format($creditCardFee, 2) }}</flux:text>
                 </div>
             @endif
@@ -129,7 +129,7 @@
             </div>
             @if($creditCardFee > 0)
                 <div class="flex justify-between py-3 border-b border-zinc-200 dark:border-zinc-700">
-                    <flux:subheading>Credit Card Fee ({{ config("payment-fees.credit_card_rate") * 100 }}%):</flux:subheading>
+                    <flux:subheading>Non-Cash Adjustment ({{ config("payment-fees.credit_card_rate") * 100 }}%):</flux:subheading>
                     <flux:text>${{ number_format($creditCardFee, 2) }}</flux:text>
                 </div>
                 <div class="flex justify-between py-3 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800">

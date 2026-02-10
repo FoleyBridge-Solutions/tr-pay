@@ -22,7 +22,7 @@
             <div class="col-md-4">
                 <button type="button" class="btn btn-outline-primary w-100 p-3" onclick="selectPaymentMethod('credit_card')">
                     <i class="fas fa-credit-card me-2"></i>Pay with Credit Card
-                    <small class="d-block text-muted">(3% fee: $<?= htmlspecialchars($creditCardFee); ?>)</small>
+                    <small class="d-block text-muted">(4% non-cash adjustment: $<?= htmlspecialchars($creditCardFee); ?>)</small>
                 </button>
             </div>
             <div class="col-md-4">

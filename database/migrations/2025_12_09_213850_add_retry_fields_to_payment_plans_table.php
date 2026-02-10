@@ -16,7 +16,7 @@ return new class extends Migration
             $table->date('next_retry_date')->nullable()->after('next_payment_date')->index();
             $table->timestamp('last_attempt_at')->nullable()->after('next_retry_date');
             $table->date('original_due_date')->nullable()->after('last_attempt_at');
-            
+
             // Add index for efficient querying of plans needing processing
             $table->index(['status', 'next_retry_date']);
         });

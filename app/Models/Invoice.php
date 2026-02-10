@@ -6,19 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * Invoice Model
- * 
- * Represents an invoice in the Practice CS system
- * 
- * ⚠️⚠️⚠️ CRITICAL: This model reads from Microsoft SQL Server (READ-ONLY!)
- * This database belongs to ANOTHER APPLICATION. We can ONLY READ data.
+ *
+ * Represents an invoice in the PracticeCS SQL Server database.
  */
 class Invoice extends Model
 {
     /**
-     * ⚠️ CRITICAL: READ-ONLY connection to external SQL Server database
+     * Connects to the PracticeCS SQL Server database.
      */
     protected $connection = 'sqlsrv';
-    
+
     /**
      * The table associated with the model.
      */

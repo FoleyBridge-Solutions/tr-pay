@@ -1,4 +1,5 @@
 <?php
+
 session_start();
 
 require_once '../bootstrap.php';
@@ -8,7 +9,7 @@ use Fbs\trpay\View\View;
 
 // Initialize the controller and view
 $paymentController = new PaymentController($conn);
-$view = new View();
+$view = new View;
 
 // Initialize current step
 $currentStep = $_SESSION['current_step'] ?? 'email_verification';
@@ -18,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $step = $_POST['step'] ?? $currentStep;
     try {
         $success = $paymentController->handleStep($step, $_POST);
-        
+
         if ($success) {
             // Only advance to next step if the current step was successful
             if ($step === 'email_verification') {
@@ -30,20 +31,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($step === 'payment_method') {
                 $_SESSION['current_step'] = 'confirmation';
             }
-            
+
             // UPDATE CURRENT STEP AFTER PROCESSING - THIS IS THE KEY FIX
             $currentStep = $_SESSION['current_step'];
-            
+
             // Optional: redirect to prevent form resubmission
-            header("Location: payment.php");
+            header('Location: payment.php');
             exit;
         } else {
             // Step failed, add error message
             $error = "Validation failed for step: $step";
             if ($step === 'email_verification') {
-                $error = "No company found with this email address.";
+                $error = 'No company found with this email address.';
             } elseif ($step === 'verify_code') {
-                $error = "Invalid verification code.";
+                $error = 'Invalid verification code.';
             }
         }
     } catch (Exception $e) {
@@ -51,10 +52,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Calculate credit card fee (3% of payment amount)
+// Calculate credit card non-cash adjustment (4% of payment amount)
 $creditCardFee = 0;
 if (isset($_SESSION['payment_amount']) && is_numeric($_SESSION['payment_amount'])) {
-    $creditCardFee = $_SESSION['payment_amount'] * 0.03;
+    $creditCardFee = $_SESSION['payment_amount'] * 0.04;
     $creditCardFee = number_format($creditCardFee, 2, '.', '');
 }
 

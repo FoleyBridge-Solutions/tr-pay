@@ -4,18 +4,20 @@ namespace App\Jobs;
 
 use App\Models\Payment;
 use App\Models\PaymentPlan;
+use App\Notifications\PaymentPlanPaymentFailed;
 use App\Services\PaymentService;
+use App\Support\AdminNotifiable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Process a scheduled payment for a payment plan.
- * 
+ *
  * This job charges the customer's saved payment method and updates
  * the payment plan records accordingly.
  */
@@ -57,22 +59,24 @@ class ProcessScheduledPayment implements ShouldQueue
         ]);
 
         // Verify the plan is still active
-        if (!$this->paymentPlan->isActive() && $this->paymentPlan->status !== PaymentPlan::STATUS_PAST_DUE) {
+        if (! $this->paymentPlan->isActive() && $this->paymentPlan->status !== PaymentPlan::STATUS_PAST_DUE) {
             Log::info('Payment plan is not active, skipping', [
                 'plan_id' => $this->paymentPlan->plan_id,
                 'status' => $this->paymentPlan->status,
             ]);
+
             return;
         }
 
         // Get the customer
         $customer = $this->paymentPlan->customer;
-        if (!$customer) {
+        if (! $customer) {
             Log::error('Customer not found for payment plan', [
                 'plan_id' => $this->paymentPlan->plan_id,
                 'customer_id' => $this->paymentPlan->customer_id,
             ]);
             $this->paymentPlan->recordFailedPayment('Customer not found');
+
             return;
         }
 
@@ -82,7 +86,7 @@ class ProcessScheduledPayment implements ShouldQueue
             // Process the payment using the saved payment method token
             $paymentNumber = $this->paymentPlan->payments_completed + 1;
             $totalPayments = $this->paymentPlan->duration_months;
-            
+
             $result = $paymentService->processPayment(
                 $customer,
                 (float) $this->paymentPlan->monthly_payment,
@@ -99,7 +103,8 @@ class ProcessScheduledPayment implements ShouldQueue
                 // Record the successful payment
                 $payment = $this->paymentPlan->recordPayment(
                     (float) $this->paymentPlan->monthly_payment,
-                    $result['transaction_id']
+                    $result['transaction_id'],
+                    $result['transaction_id'] ?? null
                 );
 
                 // If we had a scheduled payment record, update it
@@ -128,7 +133,7 @@ class ProcessScheduledPayment implements ShouldQueue
 
         } catch (\Exception $e) {
             DB::rollBack();
-            
+
             Log::error('Exception processing scheduled payment', [
                 'plan_id' => $this->paymentPlan->plan_id,
                 'error' => $e->getMessage(),
@@ -159,7 +164,8 @@ class ProcessScheduledPayment implements ShouldQueue
             $this->scheduledPayment->markAsFailed($reason);
         }
 
-        // TODO: Send payment failure notification
+        // Send payment failure notification to admin
+        $this->notifyAdminOfFailure($reason);
     }
 
     /**
@@ -174,9 +180,34 @@ class ProcessScheduledPayment implements ShouldQueue
 
         // Record the failure if not already recorded
         if ($this->paymentPlan->isActive()) {
-            $this->paymentPlan->recordFailedPayment('Job failed: ' . $exception->getMessage());
+            $this->paymentPlan->recordFailedPayment('Job failed: '.$exception->getMessage());
         }
 
-        // TODO: Send critical failure notification to admin
+        // Send critical failure notification to admin
+        $this->notifyAdminOfFailure('Job failed after all retries: '.$exception->getMessage());
+    }
+
+    /**
+     * Send failure notification to admin.
+     */
+    protected function notifyAdminOfFailure(string $errorMessage): void
+    {
+        $admin = new AdminNotifiable;
+
+        if ($admin->isConfigured()) {
+            try {
+                $paymentNumber = $this->paymentPlan->payments_completed + 1;
+                $admin->notify(new PaymentPlanPaymentFailed(
+                    $this->paymentPlan,
+                    $errorMessage,
+                    $paymentNumber
+                ));
+            } catch (\Exception $e) {
+                Log::error('Failed to send admin notification for payment plan failure', [
+                    'error' => $e->getMessage(),
+                    'plan_id' => $this->paymentPlan->plan_id,
+                ]);
+            }
+        }
     }
 }

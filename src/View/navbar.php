@@ -10,12 +10,12 @@ function renderMenu($menuItems)
     foreach ($menuItems as $item) {
         if (isset($item['children'])) {
             $html .= '<li class="nav-item dropdown">';
-            $html .= '<a class="nav-link dropdown-toggle" href="#" id="navbarDropdown' . $item['title'] . '" role="button" data-bs-toggle="dropdown" aria-expanded="false">' . $item['title'] . '</a>';
+            $html .= '<a class="nav-link dropdown-toggle" href="#" id="navbarDropdown'.$item['title'].'" role="button" data-bs-toggle="dropdown" aria-expanded="false">'.$item['title'].'</a>';
             $html .= renderSubMenu($item['children'], 'dropdown-menu');
             $html .= '</li>';
         } else {
             $html .= '<li class="nav-item">';
-            $html .= '<a class="nav-link" href="?page=' . $item['link'] . '">' . $item['title'] . '</a>';
+            $html .= '<a class="nav-link" href="?page='.$item['link'].'">'.$item['title'].'</a>';
             $html .= '</li>';
         }
     }
@@ -25,18 +25,19 @@ function renderMenu($menuItems)
 
 function renderSubMenu($menuItems, $class)
 {
-    $html = '<ul class="' . $class . '" aria-labelledby="navbarDropdown">';
+    $html = '<ul class="'.$class.'" aria-labelledby="navbarDropdown">';
     foreach ($menuItems as $item) {
         if (isset($item['children'])) {
             $html .= '<li class="dropdown-submenu">';
-            $html .= '<a class="dropdown-item dropdown-toggle" href="#">' . $item['title'] . '</a>';
+            $html .= '<a class="dropdown-item dropdown-toggle" href="#">'.$item['title'].'</a>';
             $html .= renderSubMenu($item['children'], 'dropdown-menu');
             $html .= '</li>';
         } else {
-            $html .= '<li><a class="dropdown-item" href="?page=' . $item['link'] . '">' . $item['title'] . '</a></li>';
+            $html .= '<li><a class="dropdown-item" href="?page='.$item['link'].'">'.$item['title'].'</a></li>';
         }
     }
     $html .= '</ul>';
+
     return $html;
 }
 ?>
@@ -53,12 +54,12 @@ function renderSubMenu($menuItems, $class)
     </div>
 </nav>
 
-<?php if (isset($_SESSION['alert_message'])): ?>
+<?php if (isset($_SESSION['alert_message'])) { ?>
     <div class="alert alert-<?= $_SESSION['alert_type'] ?> alert-dismissible fade show" role="alert">
         <?= $_SESSION['alert_message'] ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
     <?php unset($_SESSION['alert_message'], $_SESSION['alert_type']); ?>
-<?php endif; ?>
+<?php } ?>
 
 <div class="container mt-4">

@@ -1,8 +1,9 @@
 <?php
 $employee = $data['employee'] ?? null;
-if (!$employee) {
+if (! $employee) {
     // Handle the case where the employee data is not available
-    echo "<p>Employee not found.</p>";
+    echo '<p>Employee not found.</p>';
+
     return;
 }
 ?>
@@ -15,7 +16,7 @@ if (!$employee) {
         <form id="editEmployeeForm">
             <div class="mb-3">
                 <label for="name" class="form-label">Name</label>
-                <input type="text" class="form-control" id="name" name="name" value="<?= htmlspecialchars($employee['first_name']." ".$employee['last_name']) ?>" disabled>
+                <input type="text" class="form-control" id="name" name="name" value="<?= htmlspecialchars($employee['first_name'].' '.$employee['last_name']) ?>" disabled>
             </div>
             <div class="mb-3">
                 <label for="salary" class="form-label">Salary</label>

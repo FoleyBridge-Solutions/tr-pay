@@ -6,7 +6,7 @@ namespace App\Livewire\PaymentFlow;
 
 /**
  * Payment Flow Step Definitions
- * 
+ *
  * Named constants for all steps in the payment flow.
  * Each step has a unique string identifier for clarity and maintainability.
  */
@@ -14,18 +14,30 @@ class Steps
 {
     // Main flow steps
     public const ACCOUNT_TYPE = 'account-type';
+
     public const VERIFY_ACCOUNT = 'verify-account';
+
     public const PROJECT_ACCEPTANCE = 'project-acceptance';
+
     public const INVOICE_SELECTION = 'invoice-selection';
+
     public const PAYMENT_METHOD = 'payment-method';
+
+    public const SAVED_PAYMENT_METHODS = 'saved-payment-methods';  // New: Select from saved methods
+
     public const PAYMENT_DETAILS = 'payment-details';
+
     public const PAYMENT_PLAN_AUTH = 'payment-plan-auth';
+
     public const CONFIRMATION = 'confirmation';
-    
+
     // Loading/skeleton steps (shown between transitions)
     public const LOADING_VERIFICATION = 'loading-verification';
+
     public const LOADING_INVOICES = 'loading-invoices';
+
     public const LOADING_PAYMENT = 'loading-payment';
+
     public const PROCESSING_PAYMENT = 'processing-payment';
 
     /**
@@ -33,7 +45,7 @@ class Steps
      */
     public static function getMeta(string $step): array
     {
-        return match($step) {
+        return match ($step) {
             self::ACCOUNT_TYPE => [
                 'title' => 'Account Type',
                 'description' => 'Select your account type',
@@ -63,6 +75,12 @@ class Steps
                 'description' => 'Choose how to pay',
                 'icon' => 'credit-card',
                 'showInProgress' => true,
+            ],
+            self::SAVED_PAYMENT_METHODS => [
+                'title' => 'Saved Methods',
+                'description' => 'Use a saved payment method',
+                'icon' => 'credit-card',
+                'showInProgress' => false, // Combined with payment-details in progress
             ],
             self::PAYMENT_DETAILS => [
                 'title' => 'Payment Details',

@@ -80,6 +80,6 @@ return [
     |
     */
 
-    'email_logo_url' => env('EMAIL_LOGO_URL', env('APP_URL', 'https://example.com') . '/images/logo.png'),
+    'email_logo_url' => env('EMAIL_LOGO_URL', env('APP_URL', 'https://example.com').'/images/logo.png'),
 
 ];

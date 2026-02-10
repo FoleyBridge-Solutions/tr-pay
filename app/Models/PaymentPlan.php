@@ -4,28 +4,31 @@
 
 namespace App\Models;
 
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Log;
-use Carbon\Carbon;
 
 /**
  * PaymentPlan Model
- * 
+ *
  * Represents a payment plan for recurring payments.
- * 
+ *
  * Supports 3 plan durations:
  * - 3 months: $150 fee
  * - 6 months: $300 fee
  * - 9 months: $450 fee
- * 
+ *
+ * All plans require a 30% down payment of the total amount.
+ *
  * @property int $id
  * @property int $customer_id
  * @property int $client_key
  * @property string $plan_id
  * @property float $invoice_amount
  * @property float $plan_fee
+ * @property float $down_payment
  * @property float $total_amount
  * @property float $monthly_payment
  * @property int $duration_months
@@ -49,9 +52,13 @@ class PaymentPlan extends Model
 {
     // Status constants
     public const STATUS_ACTIVE = 'active';
+
     public const STATUS_COMPLETED = 'completed';
+
     public const STATUS_CANCELLED = 'cancelled';
+
     public const STATUS_PAST_DUE = 'past_due';
+
     public const STATUS_FAILED = 'failed';
 
     /**
@@ -65,6 +72,7 @@ class PaymentPlan extends Model
         'plan_id',
         'invoice_amount',
         'plan_fee',
+        'down_payment',
         'total_amount',
         'monthly_payment',
         'duration_months',
@@ -98,6 +106,7 @@ class PaymentPlan extends Model
         return [
             'invoice_amount' => 'decimal:2',
             'plan_fee' => 'decimal:2',
+            'down_payment' => 'decimal:2',
             'total_amount' => 'decimal:2',
             'monthly_payment' => 'decimal:2',
             'duration_months' => 'integer',
@@ -163,6 +172,7 @@ class PaymentPlan extends Model
     public function scopeDueForPayment($query, ?Carbon $date = null)
     {
         $date = $date ?? now();
+
         return $query->where('status', self::STATUS_ACTIVE)
             ->whereNotNull('next_payment_date')
             ->where('next_payment_date', '<=', $date->toDateString());
@@ -199,8 +209,8 @@ class PaymentPlan extends Model
      */
     public function hasDuePayment(): bool
     {
-        return $this->isActive() 
-            && $this->next_payment_date 
+        return $this->isActive()
+            && $this->next_payment_date
             && $this->next_payment_date->lte(now());
     }
 
@@ -227,9 +237,15 @@ class PaymentPlan extends Model
 
     /**
      * Record a successful payment.
+     *
+     * @param  float  $amount  Payment amount
+     * @param  string  $transactionId  Gateway transaction ID
+     * @param  string|null  $vendorTransactionId  Vendor-specific transaction ID (e.g., Kotapay) for status tracking
      */
-    public function recordPayment(float $amount, string $transactionId): Payment
+    public function recordPayment(float $amount, string $transactionId, ?string $vendorTransactionId = null): Payment
     {
+        $isAch = $this->payment_method_type === 'ach';
+
         // Create the payment record
         $payment = $this->payments()->create([
             'customer_id' => $this->customer_id,
@@ -240,11 +256,13 @@ class PaymentPlan extends Model
             'total_amount' => $amount,
             'payment_method' => $this->payment_method_type,
             'payment_method_last_four' => $this->payment_method_last_four,
-            'status' => 'completed',
+            'status' => $isAch ? Payment::STATUS_PROCESSING : Payment::STATUS_COMPLETED,
             'scheduled_date' => $this->next_payment_date,
             'payment_number' => $this->payments_completed + 1,
             'is_automated' => true,
-            'processed_at' => now(),
+            'processed_at' => $isAch ? null : now(),
+            'payment_vendor' => $isAch ? 'kotapay' : null,
+            'vendor_transaction_id' => $isAch ? ($vendorTransactionId ?? $transactionId) : null,
         ]);
 
         // Update plan totals
@@ -279,7 +297,7 @@ class PaymentPlan extends Model
     public function recordFailedPayment(string $reason): Payment
     {
         // Set original due date if not already set (first failure)
-        if (!$this->original_due_date) {
+        if (! $this->original_due_date) {
             $this->original_due_date = $this->next_payment_date ?: $this->next_retry_date;
         }
 
@@ -287,7 +305,7 @@ class PaymentPlan extends Model
         $payment = $this->payments()->create([
             'customer_id' => $this->customer_id,
             'client_key' => $this->client_key,
-            'transaction_id' => 'failed_' . uniqid(),
+            'transaction_id' => 'failed_'.uniqid(),
             'amount' => $this->monthly_payment,
             'fee' => 0,
             'total_amount' => $this->monthly_payment,
@@ -334,12 +352,12 @@ class PaymentPlan extends Model
      */
     public function calculateNextRetryDate(): ?Carbon
     {
-        if (!$this->original_due_date) {
+        if (! $this->original_due_date) {
             return null;
         }
 
         $originalDue = Carbon::parse($this->original_due_date);
-        
+
         // Calculate days to add: sum of 1 + 2 + 3 + ... + payments_failed
         // Formula: n * (n + 1) / 2
         $daysToAdd = ($this->payments_failed * ($this->payments_failed + 1)) / 2;
@@ -363,7 +381,7 @@ class PaymentPlan extends Model
      */
     protected function shouldAdvanceToNextPayment(): bool
     {
-        return $this->next_payment_date !== null 
+        return $this->next_payment_date !== null
             && $this->payments_completed < $this->duration_months;
     }
 
@@ -376,13 +394,13 @@ class PaymentPlan extends Model
         $this->next_retry_date = null;
         $this->original_due_date = null;
         $this->last_attempt_at = null;
-        
+
         // Reset status back to active (we're moving on)
         $this->status = self::STATUS_ACTIVE;
-        
+
         // The next_payment_date is already set to the next month
         // The missed payment amount stays in amount_remaining
-        
+
         Log::info('Advanced to next payment, abandoning retry', [
             'plan_id' => $this->plan_id,
             'payments_completed' => $this->payments_completed,
@@ -408,7 +426,7 @@ class PaymentPlan extends Model
      */
     public static function generatePlanId(): string
     {
-        return 'plan_' . bin2hex(random_bytes(12));
+        return 'plan_'.bin2hex(random_bytes(12));
     }
 
     /**
@@ -418,7 +436,7 @@ class PaymentPlan extends Model
     {
         for ($i = 1; $i <= $this->duration_months; $i++) {
             $scheduledDate = $this->start_date->copy()->addMonths($i);
-            
+
             // Adjust final payment amount for rounding
             $amount = $this->monthly_payment;
             if ($i === $this->duration_months) {
@@ -431,7 +449,7 @@ class PaymentPlan extends Model
             $this->payments()->create([
                 'customer_id' => $this->customer_id,
                 'client_key' => $this->client_key,
-                'transaction_id' => 'scheduled_' . $this->plan_id . '_' . $i,
+                'transaction_id' => 'scheduled_'.$this->plan_id.'_'.$i,
                 'amount' => $amount,
                 'fee' => 0,
                 'total_amount' => $amount,

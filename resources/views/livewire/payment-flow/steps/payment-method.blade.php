@@ -31,7 +31,7 @@
                 </svg>
                 <div>
                     <div class="text-lg font-semibold text-zinc-900">Credit Card</div>
-                    <div class="text-sm text-zinc-600">{{ config("payment-fees.credit_card_rate") * 100 }}% fee applies</div>
+                    <div class="text-sm text-zinc-600">{{ config("payment-fees.credit_card_rate") * 100 }}% non-cash adjustment applies</div>
                 </div>
             </button>
 
@@ -77,7 +77,7 @@
     @else
         {{-- Payment Plan Selection --}}
         <flux:heading size="xl" class="mb-2">Choose Your Payment Plan</flux:heading>
-        <flux:subheading class="mb-6">Select a plan that works for you - all plans have equal monthly payments</flux:subheading>
+        <flux:subheading class="mb-6">All plans require a 30% down payment charged today</flux:subheading>
 
         {{-- Invoice Total Display --}}
         <div class="bg-zinc-50 dark:bg-zinc-900 p-4 rounded-lg mb-6">
@@ -98,11 +98,11 @@
                     <div class="flex items-center justify-between">
                         <div class="text-left">
                             <div class="text-xl font-bold text-zinc-900 dark:text-zinc-100">{{ $plan['months'] }} Months</div>
-                            <div class="text-sm text-zinc-600 dark:text-zinc-400">${{ number_format($plan['monthly_payment'], 2) }}/month</div>
+                            <div class="text-sm text-zinc-600 dark:text-zinc-400">${{ number_format($plan['monthly_payment'], 2) }}/month after down payment</div>
                         </div>
                         <div class="text-right">
                             <div class="text-lg font-semibold text-zinc-700 dark:text-zinc-300">${{ number_format($plan['fee'], 2) }} fee</div>
-                            <div class="text-sm text-zinc-500 dark:text-zinc-400">Total: ${{ number_format($plan['total_amount'], 2) }}</div>
+                            <div class="text-sm text-zinc-500 dark:text-zinc-400">Down payment: ${{ number_format($plan['down_payment'], 2) }}</div>
                         </div>
                         @if($planDuration === $plan['months'])
                             <div class="ml-4">
@@ -134,6 +134,16 @@
                             <span class="text-xl font-bold text-zinc-900 dark:text-zinc-100">${{ number_format($paymentAmount + $paymentPlanFee, 2) }}</span>
                         </div>
                     </div>
+                    <div class="border-t border-blue-200 dark:border-blue-700 pt-2 mt-2">
+                        <div class="flex justify-between items-center text-green-700 dark:text-green-400">
+                            <span class="font-semibold">Down Payment Due Today (30%):</span>
+                            <span class="text-lg font-bold">${{ number_format($downPayment, 2) }}</span>
+                        </div>
+                        <div class="flex justify-between items-center text-zinc-600 dark:text-zinc-400 text-sm mt-1">
+                            <span>Remaining Balance ({{ $planDuration }} monthly payments):</span>
+                            <span>${{ number_format(($paymentAmount + $paymentPlanFee) - $downPayment, 2) }}</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         @endif
@@ -151,14 +161,19 @@
                     </flux:table.columns>
                     <flux:table.rows>
                         @foreach($paymentSchedule as $payment)
-                            <flux:table.row>
+                            <flux:table.row class="{{ ($payment['type'] ?? '') === 'down_payment' ? 'bg-green-50 dark:bg-green-900/20' : '' }}">
                                 <flux:table.cell>
-                                    <div class="font-medium">{{ $payment['label'] }}</div>
+                                    <div class="font-medium {{ ($payment['type'] ?? '') === 'down_payment' ? 'text-green-700 dark:text-green-400' : '' }}">
+                                        {{ $payment['label'] }}
+                                        @if(($payment['type'] ?? '') === 'down_payment')
+                                            <span class="text-xs ml-1">(Due Today)</span>
+                                        @endif
+                                    </div>
                                 </flux:table.cell>
                                 <flux:table.cell class="whitespace-nowrap">
                                     {{ $payment['due_date'] }}
                                 </flux:table.cell>
-                                <flux:table.cell variant="strong" align="end">
+                                <flux:table.cell variant="strong" align="end" class="{{ ($payment['type'] ?? '') === 'down_payment' ? 'text-green-700 dark:text-green-400' : '' }}">
                                     ${{ number_format($payment['amount'], 2) }}
                                 </flux:table.cell>
                             </flux:table.row>

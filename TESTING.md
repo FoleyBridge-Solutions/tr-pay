@@ -147,12 +147,8 @@ php artisan test --coverage
 - **EXP-001:** Expansion Project 1 ($150.00)
 - **EXP-002:** Expansion Project 2 ($200.00)
 
-### MiPaymentChoice Test Credentials
-```env
-MIPAYMENTCHOICE_USERNAME=mcnorthapi1
-MIPAYMENTCHOICE_PASSWORD=MCGws6sP2
-MIPAYMENTCHOICE_BASE_URL=https://gateway.mipaymentchoice.com
-```
+### MiPaymentChoice Credentials
+Credentials are configured in `.env`. Do not commit credentials to version control.
 
 ## What's Tested
 

@@ -1,11 +1,11 @@
 <div class="card">
     <div class="card-header text-center">
         <h3>Payment Information</h3>
-        <?php if (isset($_SESSION['has_multiple_clients']) && $_SESSION['has_multiple_clients']): ?>
+        <?php if (isset($_SESSION['has_multiple_clients']) && $_SESSION['has_multiple_clients']) { ?>
             <p class="mb-0">You have invoices from multiple accounts</p>
-        <?php else: ?>
+        <?php } else { ?>
             <p class="mb-0">Enter payment details for <?= htmlspecialchars($_SESSION['client_name'] ?? 'your account') ?></p>
-        <?php endif; ?>
+        <?php } ?>
     </div>
     <div class="card-body">
         <form method="post">
@@ -13,12 +13,12 @@
 
             <?php
             $companyBalance = $_SESSION['company_info']['balance'] ?? 0;
-            $customerId = $_SESSION['customer_id'] ?? 'N/A';
-            $openInvoices = $_SESSION['open_invoices'] ?? [];
-            $hasInvoices = !empty($openInvoices);
-            ?>
+        $customerId = $_SESSION['customer_id'] ?? 'N/A';
+        $openInvoices = $_SESSION['open_invoices'] ?? [];
+        $hasInvoices = ! empty($openInvoices);
+        ?>
 
-            <?php if ($hasInvoices): ?>
+            <?php if ($hasInvoices) { ?>
                 <div class="mb-4">
                     <h5>Select Invoice(s) to Pay</h5>
                     <div class="table-responsive">
@@ -26,9 +26,9 @@
                             <thead>
                                 <tr>
                                     <th><input type="checkbox" id="select-all" class="form-check-input"></th>
-                                    <?php if (isset($_SESSION['has_multiple_clients']) && $_SESSION['has_multiple_clients']): ?>
+                                    <?php if (isset($_SESSION['has_multiple_clients']) && $_SESSION['has_multiple_clients']) { ?>
                                         <th>Client</th>
-                                    <?php endif; ?>
+                                    <?php } ?>
                                     <th>Invoice #</th>
                                     <th>Date</th>
                                     <th>Due Date</th>
@@ -37,39 +37,39 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php 
-                                // Sort invoices by client if multiple clients
-                                if (isset($_SESSION['has_multiple_clients']) && $_SESSION['has_multiple_clients']) {
-                                    usort($openInvoices, function($a, $b) {
-                                        return strcmp($a['client_name'], $b['client_name']);
-                                    });
-                                }
-                                
-                                $currentClient = null;
-                                foreach ($openInvoices as $invoice): 
-                                    // Add client section header if multiple clients
-                                    if (isset($_SESSION['has_multiple_clients']) && 
-                                        $_SESSION['has_multiple_clients'] && 
-                                        $currentClient !== $invoice['client_name']) {
-                                        $currentClient = $invoice['client_name'];
-                                    }
-                                ?>
+                                <?php
+                            // Sort invoices by client if multiple clients
+                            if (isset($_SESSION['has_multiple_clients']) && $_SESSION['has_multiple_clients']) {
+                                usort($openInvoices, function ($a, $b) {
+                                    return strcmp($a['client_name'], $b['client_name']);
+                                });
+                            }
+
+                $currentClient = null;
+                foreach ($openInvoices as $invoice) {
+                    // Add client section header if multiple clients
+                    if (isset($_SESSION['has_multiple_clients']) &&
+                        $_SESSION['has_multiple_clients'] &&
+                        $currentClient !== $invoice['client_name']) {
+                        $currentClient = $invoice['client_name'];
+                    }
+                    ?>
                                 <tr>
                                     <td>
                                         <input type="checkbox" name="invoices[]" value="<?= $invoice['ledger_entry_KEY'] ?>" 
                                                class="form-check-input invoice-checkbox" 
                                                data-amount="<?= $invoice['open_amount'] ?>">
                                     </td>
-                                    <?php if (isset($_SESSION['has_multiple_clients']) && $_SESSION['has_multiple_clients']): ?>
+                                    <?php if (isset($_SESSION['has_multiple_clients']) && $_SESSION['has_multiple_clients']) { ?>
                                         <td><?= htmlspecialchars($invoice['client_name']) ?></td>
-                                    <?php endif; ?>
+                                    <?php } ?>
                                     <td><?= htmlspecialchars($invoice['invoice_number']) ?></td>
                                     <td><?= htmlspecialchars($invoice['invoice_date']) ?></td>
                                     <td><?= htmlspecialchars($invoice['due_date']) ?></td>
                                     <td><?= htmlspecialchars($invoice['description']) ?></td>
                                     <td class="text-end">$<?= htmlspecialchars($invoice['open_amount']) ?></td>
                                 </tr>
-                                <?php endforeach; ?>
+                                <?php } ?>
                             </tbody>
                             <tfoot>
                                 <tr>
@@ -80,11 +80,11 @@
                         </table>
                     </div>
                 </div>
-            <?php else: ?>
+            <?php } else { ?>
                 <div class="alert alert-info">
                     No open invoices found for this account. You can still make a payment by entering an amount below.
                 </div>
-            <?php endif; ?>
+            <?php } ?>
 
             <div class="mb-3">
                 <label for="amount" class="form-label">Payment Amount</label>

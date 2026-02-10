@@ -6,22 +6,22 @@ $card_title = $card['title'];
 $table_header_rows = $table['header_rows'];
 $table_body_rows = $table['body_rows'];
 
-//if action is not an array of arrays, make it an array of arrays
+// if action is not an array of arrays, make it an array of arrays
 if (isset($action)) {
-    if (!is_array($action[0])) {
+    if (! is_array($action[0])) {
         $action = [$action];
     }
 }
 if (isset($table['footer_row'])) {
-    if (!is_array($table['footer_row'])) {
+    if (! is_array($table['footer_row'])) {
         $table['footer_row'] = [$table['footer_row']];
     }
 }
 
 ?>
-<?php if (isset($header_cards)) : ?>
+<?php if (isset($header_cards)) { ?>
     <div class="row">
-        <?php foreach ($header_cards as $header_card) : ?>
+        <?php foreach ($header_cards as $header_card) { ?>
             <?php $card_count = count($header_cards); ?>
             <div class="col-md-<?= 12 / $card_count ?>">
                 <div class="card mb-3">
@@ -33,9 +33,9 @@ if (isset($table['footer_row'])) {
                     </div>
                 </div>
             </div>
-        <?php endforeach; ?>
+        <?php } ?>
     </div>
-<?php endif; ?>
+<?php } ?>
 
 
 <div class="card">
@@ -43,13 +43,13 @@ if (isset($table['footer_row'])) {
         <h5 class="card-title"><?= $card_title ?></h5>
         <div class="ms-auto">
             <!-- Card Action -->
-            <?php foreach ($action as $action_item) : ?>
-                <?php if (isset($action_item['page'])) : ?>
+            <?php foreach ($action as $action_item) { ?>
+                <?php if (isset($action_item['page'])) { ?>
                     <a href="/?page=<?= $action_item['page'] ?>" class="btn btn-primary">
                         <?= $action_item['title'] ?>
                     </a>
-                <?php endif; ?>
-            <?php endforeach; ?>
+                <?php } ?>
+            <?php } ?>
         </div>
     </div>
     <div class="card-body">
@@ -57,37 +57,37 @@ if (isset($table['footer_row'])) {
             <table class="table table-striped table-bordered" id="dataTable">
                 <thead>
                     <tr>
-                        <?php foreach ($table_header_rows as $header_row) : ?>
+                        <?php foreach ($table_header_rows as $header_row) { ?>
                             <th><?= $header_row ?></th>
-                        <?php endforeach; ?>
+                        <?php } ?>
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($table_body_rows as $body_row) : ?>
+                    <?php foreach ($table_body_rows as $body_row) { ?>
                         <tr>
-                            <?php foreach ($body_row as $cell) : ?>
+                            <?php foreach ($body_row as $cell) { ?>
                                 <td><?= $cell ?></td>
-                            <?php endforeach; ?>
+                            <?php } ?>
                         </tr>
-                    <?php endforeach; ?>
+                    <?php } ?>
                 </tbody>
             </table>
         </div>
-        <?php if (isset($table['footer_row'])) : ?>
-            <?php foreach ($table['footer_row'] as $footer_row) : ?>
+        <?php if (isset($table['footer_row'])) { ?>
+            <?php foreach ($table['footer_row'] as $footer_row) { ?>
                 <div class="card-footer">
                     <?= $footer_row ?>
                 </div>
-            <?php endforeach; ?>
-        <?php endif; ?>
+            <?php } ?>
+        <?php } ?>
     </div>
 </div>
 
-<?php if (isset($script)) : ?>
+<?php if (isset($script)) { ?>
     <script>
         <?= $script ?>
     </script>
-<?php endif; ?>
+<?php } ?>
 
 <script>
     $(document).ready(function() {

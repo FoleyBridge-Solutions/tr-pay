@@ -24,7 +24,7 @@ return new class extends Migration
             $table->string('accepted_by_ip')->nullable();
             $table->text('acceptance_signature')->nullable(); // Client name typed as signature
             $table->timestamps();
-            
+
             $table->index('client_key');
             $table->index('accepted');
         });

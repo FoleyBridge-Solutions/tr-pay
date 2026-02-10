@@ -4,7 +4,6 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 
 class ExtractDatabaseSchema extends Command
 {
@@ -35,6 +34,7 @@ class ExtractDatabaseSchema extends Command
 
             if (empty($tables)) {
                 $this->error('No tables found in database');
+
                 return;
             }
 
@@ -42,7 +42,7 @@ class ExtractDatabaseSchema extends Command
             $schema['database_info'] = $this->getDatabaseInfo();
             $schema['tables'] = [];
 
-            $this->info("Found " . count($tables) . " tables");
+            $this->info('Found '.count($tables).' tables');
 
             foreach ($tables as $table) {
                 $tableName = $table->TABLE_NAME;
@@ -64,7 +64,7 @@ class ExtractDatabaseSchema extends Command
             }
 
         } catch (\Exception $e) {
-            $this->error('Error extracting schema: ' . $e->getMessage());
+            $this->error('Error extracting schema: '.$e->getMessage());
             $this->error('Make sure the database connection is properly configured.');
         }
     }
@@ -72,12 +72,13 @@ class ExtractDatabaseSchema extends Command
     private function getDatabaseInfo()
     {
         try {
-            $result = DB::select("SELECT DB_NAME() as database_name, @@VERSION as version");
+            $result = DB::select('SELECT DB_NAME() as database_name, @@VERSION as version');
+
             return [
                 'name' => $result[0]->database_name ?? 'Unknown',
                 'version' => $result[0]->version ?? 'Unknown',
                 'connection' => config('database.default'),
-                'driver' => config('database.connections.' . config('database.default') . '.driver'),
+                'driver' => config('database.connections.'.config('database.default').'.driver'),
             ];
         } catch (\Exception $e) {
             return ['error' => $e->getMessage()];
@@ -97,9 +98,9 @@ class ExtractDatabaseSchema extends Command
         } catch (\Exception $e) {
             // Fallback for different database systems
             try {
-                return DB::select("SHOW TABLES");
+                return DB::select('SHOW TABLES');
             } catch (\Exception $e2) {
-                throw new \Exception('Could not retrieve tables: ' . $e->getMessage());
+                throw new \Exception('Could not retrieve tables: '.$e->getMessage());
             }
         }
     }
@@ -108,7 +109,7 @@ class ExtractDatabaseSchema extends Command
     {
         try {
             // MSSQL INFORMATION_SCHEMA.COLUMNS
-            $columns = DB::select("
+            $columns = DB::select('
                 SELECT
                     COLUMN_NAME,
                     DATA_TYPE,
@@ -120,7 +121,7 @@ class ExtractDatabaseSchema extends Command
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_NAME = ?
                 ORDER BY ORDINAL_POSITION
-            ", [$tableName]);
+            ', [$tableName]);
 
             $result = [];
             foreach ($columns as $col) {
@@ -144,7 +145,7 @@ class ExtractDatabaseSchema extends Command
     {
         try {
             // MSSQL sys.indexes and sys.index_columns
-            $indexes = DB::select("
+            $indexes = DB::select('
                 SELECT
                     i.name as index_name,
                     i.type_desc as index_type,
@@ -158,12 +159,12 @@ class ExtractDatabaseSchema extends Command
                 INNER JOIN sys.tables t ON i.object_id = t.object_id
                 WHERE t.name = ? AND i.type > 0
                 ORDER BY i.name, ic.key_ordinal
-            ", [$tableName]);
+            ', [$tableName]);
 
             $result = [];
             foreach ($indexes as $idx) {
                 $indexName = $idx->index_name;
-                if (!isset($result[$indexName])) {
+                if (! isset($result[$indexName])) {
                     $result[$indexName] = [
                         'type' => $idx->index_type,
                         'unique' => $idx->is_unique,
@@ -184,7 +185,7 @@ class ExtractDatabaseSchema extends Command
     {
         try {
             // MSSQL foreign key information
-            $fks = DB::select("
+            $fks = DB::select('
                 SELECT
                     fk.name as constraint_name,
                     c1.name as column_name,
@@ -197,12 +198,12 @@ class ExtractDatabaseSchema extends Command
                 INNER JOIN sys.tables t2 ON fk.referenced_object_id = t2.object_id
                 INNER JOIN sys.columns c2 ON fkc.referenced_object_id = c2.object_id AND fkc.referenced_column_id = c2.column_id
                 WHERE t1.name = ?
-            ", [$tableName]);
+            ', [$tableName]);
 
             $result = [];
             foreach ($fks as $fk) {
                 $constraintName = $fk->constraint_name;
-                if (!isset($result[$constraintName])) {
+                if (! isset($result[$constraintName])) {
                     $result[$constraintName] = [
                         'columns' => [],
                         'referenced_table' => $fk->referenced_table,
@@ -222,7 +223,7 @@ class ExtractDatabaseSchema extends Command
     private function getTablePrimaryKey($tableName)
     {
         try {
-            $pk = DB::select("
+            $pk = DB::select('
                 SELECT c.name as column_name
                 FROM sys.indexes i
                 INNER JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
@@ -230,7 +231,7 @@ class ExtractDatabaseSchema extends Command
                 INNER JOIN sys.tables t ON i.object_id = t.object_id
                 WHERE t.name = ? AND i.is_primary_key = 1
                 ORDER BY ic.key_ordinal
-            ", [$tableName]);
+            ', [$tableName]);
 
             return array_column($pk, 'column_name');
         } catch (\Exception $e) {
@@ -240,7 +241,7 @@ class ExtractDatabaseSchema extends Command
 
     private function displaySchema($schema)
     {
-        $this->info("\n" . str_repeat('=', 80));
+        $this->info("\n".str_repeat('=', 80));
         $this->info('DATABASE SCHEMA');
         $this->info(str_repeat('=', 80));
 
@@ -250,13 +251,13 @@ class ExtractDatabaseSchema extends Command
         $this->line("Driver: {$schema['database_info']['driver']}");
 
         foreach ($schema['tables'] as $tableName => $tableInfo) {
-            $this->info("\n" . str_repeat('-', 60));
+            $this->info("\n".str_repeat('-', 60));
             $this->info("TABLE: {$tableName}");
             $this->info(str_repeat('-', 60));
 
             // Columns
-            if (!empty($tableInfo['columns'])) {
-                $this->line("COLUMNS:");
+            if (! empty($tableInfo['columns'])) {
+                $this->line('COLUMNS:');
                 foreach ($tableInfo['columns'] as $colName => $colInfo) {
                     $nullable = $colInfo['nullable'] ? 'NULL' : 'NOT NULL';
                     $default = $colInfo['default'] ? " DEFAULT {$colInfo['default']}" : '';
@@ -265,13 +266,13 @@ class ExtractDatabaseSchema extends Command
             }
 
             // Primary Key
-            if (!empty($tableInfo['primary_key'])) {
-                $this->line("PRIMARY KEY: " . implode(', ', $tableInfo['primary_key']));
+            if (! empty($tableInfo['primary_key'])) {
+                $this->line('PRIMARY KEY: '.implode(', ', $tableInfo['primary_key']));
             }
 
             // Indexes
-            if (!empty($tableInfo['indexes'])) {
-                $this->line("INDEXES:");
+            if (! empty($tableInfo['indexes'])) {
+                $this->line('INDEXES:');
                 foreach ($tableInfo['indexes'] as $idxName => $idxInfo) {
                     $unique = $idxInfo['unique'] ? 'UNIQUE ' : '';
                     $type = $idxInfo['type'] ?? 'INDEX';
@@ -281,8 +282,8 @@ class ExtractDatabaseSchema extends Command
             }
 
             // Foreign Keys
-            if (!empty($tableInfo['foreign_keys'])) {
-                $this->line("FOREIGN KEYS:");
+            if (! empty($tableInfo['foreign_keys'])) {
+                $this->line('FOREIGN KEYS:');
                 foreach ($tableInfo['foreign_keys'] as $fkName => $fkInfo) {
                     $columns = implode(', ', $fkInfo['columns']);
                     $refColumns = implode(', ', $fkInfo['referenced_columns']);
@@ -291,23 +292,23 @@ class ExtractDatabaseSchema extends Command
             }
         }
 
-        $this->info("\n" . str_repeat('=', 80));
-        $this->info("Schema extraction complete. Use --save to save to file.");
+        $this->info("\n".str_repeat('=', 80));
+        $this->info('Schema extraction complete. Use --save to save to file.');
         $this->info(str_repeat('=', 80));
     }
 
     private function saveSchema($schema)
     {
-        $filename = 'database_schema_' . date('Y-m-d_H-i-s') . '.json';
-        $path = storage_path('app/' . $filename);
+        $filename = 'database_schema_'.date('Y-m-d_H-i-s').'.json';
+        $path = storage_path('app/'.$filename);
 
         file_put_contents($path, json_encode($schema, JSON_PRETTY_PRINT));
 
         $this->info("Schema saved to: {$path}");
 
         // Also create a text version
-        $textFilename = 'database_schema_' . date('Y-m-d_H-i-s') . '.txt';
-        $textPath = storage_path('app/' . $textFilename);
+        $textFilename = 'database_schema_'.date('Y-m-d_H-i-s').'.txt';
+        $textPath = storage_path('app/'.$textFilename);
 
         ob_start();
         $this->displaySchema($schema);
