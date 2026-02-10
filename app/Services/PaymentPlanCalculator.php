@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\Money;
 use Carbon\Carbon;
 
 /**
@@ -44,18 +45,18 @@ class PaymentPlanCalculator
         $plans = [];
 
         foreach (self::PLAN_OPTIONS as $months => $fee) {
-            $totalAmount = $invoiceAmount + $fee;
+            $totalAmount = Money::addDollars($invoiceAmount, $fee);
             $downPayment = $this->calculateDownPayment($totalAmount);
-            $remainingBalance = $totalAmount - $downPayment;
-            $monthlyPayment = round($remainingBalance / $months, 2);
+            $remainingBalance = Money::subtractDollars($totalAmount, $downPayment);
+            $monthlyPayment = Money::round($remainingBalance / $months);
 
             $plans[] = [
                 'months' => $months,
                 'fee' => $fee,
-                'total_amount' => round($totalAmount, 2),
+                'total_amount' => Money::round($totalAmount),
                 'down_payment' => $downPayment,
                 'down_payment_percent' => self::DOWN_PAYMENT_PERCENT * 100,
-                'remaining_balance' => round($remainingBalance, 2),
+                'remaining_balance' => Money::round($remainingBalance),
                 'monthly_payment' => $monthlyPayment,
             ];
         }
@@ -71,7 +72,7 @@ class PaymentPlanCalculator
      */
     public function calculateDownPayment(float $totalAmount): float
     {
-        return round($totalAmount * self::DOWN_PAYMENT_PERCENT, 2);
+        return Money::multiplyDollars($totalAmount, self::DOWN_PAYMENT_PERCENT);
     }
 
     /**
@@ -88,10 +89,10 @@ class PaymentPlanCalculator
     public function calculateSplitDownPayment(float $totalAmount, ?Carbon $startDate = null): array
     {
         $downPayment = $this->calculateDownPayment($totalAmount);
-        $halfPayment = round($downPayment / 2, 2);
+        $halfPayment = Money::round($downPayment / 2);
         // Ensure the two halves equal the total (handle rounding)
         $firstPayment = $halfPayment;
-        $secondPayment = $downPayment - $firstPayment;
+        $secondPayment = Money::subtractDollars($downPayment, $firstPayment);
 
         $start = $startDate ?? now();
         $dayOfMonth = $start->day;
@@ -164,23 +165,23 @@ class PaymentPlanCalculator
         }
 
         $fee = $this->getFee($duration);
-        $totalAmount = $invoiceAmount + $fee;
+        $totalAmount = Money::addDollars($invoiceAmount, $fee);
         $downPayment = $this->calculateDownPayment($totalAmount);
-        $remainingBalance = $totalAmount - $downPayment;
-        $monthlyPayment = round($remainingBalance / $duration, 2);
+        $remainingBalance = Money::subtractDollars($totalAmount, $downPayment);
+        $monthlyPayment = Money::round($remainingBalance / $duration);
 
         // Calculate last payment to handle rounding
-        $lastPayment = $remainingBalance - ($monthlyPayment * ($duration - 1));
+        $lastPayment = Money::subtractDollars($remainingBalance, Money::multiplyDollars($monthlyPayment, $duration - 1));
 
         return [
-            'invoice_amount' => round($invoiceAmount, 2),
+            'invoice_amount' => Money::round($invoiceAmount),
             'plan_fee' => $fee,
-            'total_amount' => round($totalAmount, 2),
+            'total_amount' => Money::round($totalAmount),
             'down_payment' => $downPayment,
             'down_payment_percent' => self::DOWN_PAYMENT_PERCENT * 100,
-            'remaining_balance' => round($remainingBalance, 2),
+            'remaining_balance' => Money::round($remainingBalance),
             'monthly_payment' => $monthlyPayment,
-            'last_payment' => round($lastPayment, 2),
+            'last_payment' => Money::round($lastPayment),
             'duration_months' => $duration,
         ];
     }
@@ -250,7 +251,7 @@ class PaymentPlanCalculator
                 'type' => 'installment',
                 'due_date' => $dueDate->format('M j, Y'),
                 'due_date_raw' => $dueDate->format('Y-m-d'),
-                'amount' => round($amount, 2),
+                'amount' => Money::round($amount),
                 'label' => "Payment $i of $duration",
             ];
         }
@@ -280,7 +281,7 @@ class PaymentPlanCalculator
     public function calculateFee(float $paymentAmount, float $downPayment, int $duration, string $frequency): array
     {
         $fee = $this->getFee($duration);
-        $totalAmount = $paymentAmount + $fee;
+        $totalAmount = Money::addDollars($paymentAmount, $fee);
         $calculatedDownPayment = $this->calculateDownPayment($totalAmount);
 
         return [

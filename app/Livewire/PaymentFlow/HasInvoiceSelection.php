@@ -4,6 +4,8 @@
 
 namespace App\Livewire\PaymentFlow;
 
+use App\Support\Money;
+
 /**
  * Trait for invoice selection, sorting, and client grouping functionality.
  *
@@ -348,15 +350,15 @@ trait HasInvoiceSelection
      */
     public function calculatePaymentAmount(): void
     {
-        $total = 0;
+        $totalCents = 0;
 
         foreach ($this->openInvoices as $invoice) {
             if (in_array($invoice['invoice_number'], $this->selectedInvoices)) {
-                $total += (float) $invoice['open_amount'];
+                $totalCents += Money::toCents($invoice['open_amount']);
             }
         }
 
-        $this->paymentAmount = $total;
+        $this->paymentAmount = Money::toDollars($totalCents);
     }
 
     /**
@@ -372,9 +374,10 @@ trait HasInvoiceSelection
         }
 
         // Calculate max allowed payment amount
-        $selectedTotal = collect($this->openInvoices)
+        $selectedTotalCents = collect($this->openInvoices)
             ->whereIn('invoice_number', $this->selectedInvoices)
-            ->sum('open_amount');
+            ->reduce(fn (int $carry, array $inv) => $carry + Money::toCents($inv['open_amount']), 0);
+        $selectedTotal = Money::toDollars($selectedTotalCents);
 
         $this->validate([
             'paymentAmount' => 'required|numeric|min:0.01|max:'.$selectedTotal,
