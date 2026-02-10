@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Admin\Clients;
 
+use App\Livewire\Admin\Concerns\ValidatesPaymentMethod;
 use App\Models\AdminActivity;
 use App\Models\Customer;
 use App\Models\CustomerPaymentMethod;
@@ -22,6 +23,8 @@ use Livewire\Component;
 #[Layout('layouts.admin')]
 class PaymentMethods extends Component
 {
+    use ValidatesPaymentMethod;
+
     // Client data
     #[Url(as: 'client')]
     public ?int $clientKey = null;
@@ -274,53 +277,23 @@ class PaymentMethods extends Component
     }
 
     /**
-     * Validate payment method fields.
+     * Get the property name that holds the payment method type.
+     *
+     * This component uses $paymentType instead of $paymentMethodType.
      */
-    protected function validatePaymentMethod(): bool
+    protected function paymentTypeProperty(): string
     {
-        if ($this->paymentType === 'card') {
-            $cardNumber = preg_replace('/\D/', '', $this->cardNumber);
-            if (strlen($cardNumber) < 13 || strlen($cardNumber) > 19) {
-                $this->errorMessage = 'Please enter a valid card number.';
+        return 'paymentType';
+    }
 
-                return false;
-            }
-            if (empty($this->cardExpiry) || ! preg_match('/^\d{2}\/\d{2}$/', $this->cardExpiry)) {
-                $this->errorMessage = 'Please enter a valid expiry date (MM/YY).';
-
-                return false;
-            }
-            if (empty($this->cardCvv) || strlen($this->cardCvv) < 3) {
-                $this->errorMessage = 'Please enter a valid CVV.';
-
-                return false;
-            }
-            if (empty($this->cardName)) {
-                $this->errorMessage = 'Please enter the name on card.';
-
-                return false;
-            }
-        } else {
-            $routingNumber = preg_replace('/\D/', '', $this->routingNumber);
-            if (strlen($routingNumber) !== 9) {
-                $this->errorMessage = 'Please enter a valid 9-digit routing number.';
-
-                return false;
-            }
-            $accountNumber = preg_replace('/\D/', '', $this->accountNumber);
-            if (strlen($accountNumber) < 4 || strlen($accountNumber) > 17) {
-                $this->errorMessage = 'Please enter a valid account number.';
-
-                return false;
-            }
-            if (empty($this->accountName)) {
-                $this->errorMessage = 'Please enter the account holder name.';
-
-                return false;
-            }
-        }
-
-        return true;
+    /**
+     * Get the supported payment method types.
+     *
+     * Payment method management only supports card and ACH (no saved).
+     */
+    protected function supportedPaymentTypes(): array
+    {
+        return ['card', 'ach'];
     }
 
     /**

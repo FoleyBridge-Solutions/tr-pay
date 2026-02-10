@@ -305,7 +305,7 @@ class PaymentPlan extends Model
         $payment = $this->payments()->create([
             'customer_id' => $this->customer_id,
             'client_key' => $this->client_key,
-            'transaction_id' => 'failed_'.uniqid(),
+            'transaction_id' => 'failed_'.bin2hex(random_bytes(16)),
             'amount' => $this->monthly_payment,
             'fee' => 0,
             'total_amount' => $this->monthly_payment,

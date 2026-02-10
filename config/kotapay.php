@@ -7,8 +7,12 @@ return [
     | Kotapay ACH Configuration
     |--------------------------------------------------------------------------
     |
-    | Configuration for Kotapay ACH file generation and API submission.
+    | Configuration for Kotapay ACH payments and file generation.
     | Kotapay is a division of First International Bank & Trust.
+    |
+    | NOTE: API credential keys (enabled, client_id, client_secret, etc.)
+    | are at the top level to match the kotapay-cashier package's expected
+    | config structure. Do NOT nest them under an 'api' sub-array.
     |
     */
 
@@ -16,10 +20,12 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | API Configuration (Recommended)
+    | API Credentials (Top-Level)
     |--------------------------------------------------------------------------
     |
-    | Kotapay API credentials for ACH payments and file upload.
+    | These keys are read directly by the kotapay-cashier package as
+    | config('kotapay.enabled'), config('kotapay.client_id'), etc.
+    |
     | API Base URL: https://api.kotapay.com
     |
     | Endpoints:
@@ -33,18 +39,70 @@ return [
     |
     */
 
-    'api' => [
-        'enabled' => env('KOTAPAY_API_ENABLED', true),
+    'enabled' => env('KOTAPAY_API_ENABLED', true),
 
-        // OAuth2 credentials (provided by Kotapay)
-        'client_id' => env('KOTAPAY_API_CLIENT_ID'),
-        'client_secret' => env('KOTAPAY_API_CLIENT_SECRET'),
-        'username' => env('KOTAPAY_API_USERNAME'),
-        'password' => env('KOTAPAY_API_PASSWORD'),
+    'base_url' => env('KOTAPAY_API_BASE_URL', 'https://api.kotapay.com'),
 
-        // Company ID for API requests (provided by Kotapay)
-        'company_id' => env('KOTAPAY_API_COMPANY_ID'),
+    // OAuth2 credentials (provided by Kotapay)
+    'client_id' => env('KOTAPAY_API_CLIENT_ID'),
+    'client_secret' => env('KOTAPAY_API_CLIENT_SECRET'),
+    'username' => env('KOTAPAY_API_USERNAME'),
+    'password' => env('KOTAPAY_API_PASSWORD'),
+
+    // Company ID for API requests (provided by Kotapay)
+    'company_id' => env('KOTAPAY_API_COMPANY_ID'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Token Cache
+    |--------------------------------------------------------------------------
+    |
+    | The access token expires after 300 seconds (5 minutes).
+    | We cache it with a buffer to prevent using expired tokens.
+    |
+    */
+
+    'token_cache_key' => 'kotapay_access_token',
+    'token_cache_ttl' => 270, // 4.5 minutes (300 - 30 second buffer)
+
+    /*
+    |--------------------------------------------------------------------------
+    | Request Timeout
+    |--------------------------------------------------------------------------
+    */
+
+    'timeout' => env('KOTAPAY_TIMEOUT', 30),
+
+    /*
+    |--------------------------------------------------------------------------
+    | API Rate Limiting
+    |--------------------------------------------------------------------------
+    */
+
+    'rate_limit' => [
+        'enabled' => env('KOTAPAY_RATE_LIMIT_ENABLED', true),
+        'max_requests_per_hour' => env('KOTAPAY_RATE_LIMIT_PER_HOUR', 1000),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Retry Settings
+    |--------------------------------------------------------------------------
+    */
+
+    'retry' => [
+        'enabled' => env('KOTAPAY_RETRY_ENABLED', true),
+        'max_attempts' => env('KOTAPAY_RETRY_MAX_ATTEMPTS', 3),
+        'delay_ms' => env('KOTAPAY_RETRY_DELAY_MS', 100),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Customer Model
+    |--------------------------------------------------------------------------
+    */
+
+    'model' => env('KOTAPAY_CUSTOMER_MODEL', 'App\\Models\\Customer'),
 
     /*
     |--------------------------------------------------------------------------

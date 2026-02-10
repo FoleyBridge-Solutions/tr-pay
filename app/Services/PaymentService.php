@@ -93,7 +93,7 @@ class PaymentService
      */
     public function isKotapayEnabled(): bool
     {
-        return config('kotapay.api.enabled', false);
+        return config('kotapay.enabled', false);
     }
 
     /**
@@ -191,6 +191,7 @@ class PaymentService
         } catch (\Exception $e) {
             Log::error('Failed to create setup intent', [
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
                 'client_info' => $clientInfo,
             ]);
 
@@ -229,7 +230,7 @@ class PaymentService
 
             return [
                 'success' => true,
-                'transaction_id' => $response['PnRef'] ?? $response['TransactionId'] ?? uniqid('txn_'),
+                'transaction_id' => $response['PnRef'] ?? $response['TransactionId'] ?? 'txn_'.bin2hex(random_bytes(16)),
                 'amount' => $amount,
                 'status' => self::STATUS_COMPLETED,
                 'response' => $response,
@@ -243,6 +244,7 @@ class PaymentService
                 'customer_id' => $customer->id,
                 'amount' => $amount,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
                 'response' => $errorResponse,
             ]);
 
@@ -295,7 +297,7 @@ class PaymentService
 
             return [
                 'success' => true,
-                'transaction_id' => $response['transaction_id'] ?? uniqid('ach_'),
+                'transaction_id' => $response['transaction_id'] ?? 'ach_'.bin2hex(random_bytes(16)),
                 'amount' => $amount,
                 'status' => self::STATUS_PENDING, // ACH payments are pending until settled
                 'response' => $response,
@@ -307,6 +309,7 @@ class PaymentService
                 'customer_id' => $customer->id,
                 'amount' => $amount,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return [
@@ -446,6 +449,7 @@ class PaymentService
         } catch (\Exception $e) {
             Log::error('Failed to setup payment plan', [
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
                 'client_info' => $clientInfo,
             ]);
 
@@ -486,7 +490,7 @@ class PaymentService
 
             return [
                 'success' => true,
-                'transaction_id' => $response['PnRef'] ?? $response['TransactionId'] ?? uniqid('txn_'),
+                'transaction_id' => $response['PnRef'] ?? $response['TransactionId'] ?? 'txn_'.bin2hex(random_bytes(16)),
                 'amount' => $amount,
                 'status' => self::STATUS_COMPLETED,
             ];
@@ -496,6 +500,7 @@ class PaymentService
                 'customer_id' => $customer->id,
                 'amount' => $amount,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return [
@@ -592,6 +597,7 @@ class PaymentService
         } catch (\Exception $e) {
             Log::error('Recurring charge failed', [
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
                 'amount' => $amount,
                 'type' => $paymentData['type'] ?? 'unknown',
             ]);
@@ -645,7 +651,7 @@ class PaymentService
             'effective_date' => now()->format('Y-m-d'),
         ]);
 
-        $transactionId = $response['transaction_id'] ?? uniqid('ach_');
+        $transactionId = $response['transaction_id'] ?? 'ach_'.bin2hex(random_bytes(16));
 
         Log::info('Recurring ACH charge processed via Kotapay', [
             'transaction_id' => $transactionId,
@@ -877,13 +883,14 @@ class PaymentService
 
             return [
                 'success' => true,
-                'transaction_id' => $response['PnRef'] ?? $response['TransactionId'] ?? 'dp_'.uniqid(),
+                'transaction_id' => $response['PnRef'] ?? $response['TransactionId'] ?? 'dp_'.bin2hex(random_bytes(16)),
                 'amount' => $amount,
             ];
 
         } catch (PaymentFailedException $e) {
             Log::error('Down payment failed', [
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
                 'amount' => $amount,
                 'plan_id' => $planId,
             ]);
@@ -1000,7 +1007,7 @@ class PaymentService
 
             return [
                 'success' => true,
-                'transaction_id' => $response['PnRef'] ?? $response['TransactionId'] ?? uniqid('txn_'),
+                'transaction_id' => $response['PnRef'] ?? $response['TransactionId'] ?? 'txn_'.bin2hex(random_bytes(16)),
                 'amount' => $amount,
                 'status' => self::STATUS_COMPLETED,
                 'response' => $response,
@@ -1012,6 +1019,7 @@ class PaymentService
                 'payment_method_id' => $savedMethod->id,
                 'amount' => $amount,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return [
@@ -1065,6 +1073,7 @@ class PaymentService
         } catch (\Exception $e) {
             Log::error('Failed to convert QP token to reusable token', [
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return null;
@@ -1095,6 +1104,7 @@ class PaymentService
         } catch (\Exception $e) {
             Log::error('Failed to tokenize card', [
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return [
@@ -1141,6 +1151,7 @@ class PaymentService
         } catch (\Exception $e) {
             Log::error('Failed to generate ACH pseudo-token', [
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return [

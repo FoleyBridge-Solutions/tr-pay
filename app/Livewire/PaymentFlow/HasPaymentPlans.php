@@ -141,51 +141,72 @@ trait HasPaymentPlans
             'agreeToTerms.accepted' => 'You must agree to the terms and conditions to continue.',
         ]);
 
-        // Validate payment method details based on selected method
-        if ($this->paymentMethod === 'credit_card') {
-            $this->validate([
-                'cardNumber' => ['required', 'string', 'regex:/^\d{4}\s\d{4}\s\d{4}\s\d{4}$/'],
-                'cardExpiry' => ['required', 'string', 'regex:/^(0[1-9]|1[0-2])\/\d{2}$/'],
-                'cardCvv' => ['required', 'string', 'regex:/^\d{3,4}$/'],
-            ], [
-                'cardNumber.required' => 'Credit card number is required',
-                'cardNumber.regex' => 'Please enter a valid credit card number (XXXX XXXX XXXX XXXX)',
-                'cardExpiry.required' => 'Expiration date is required',
-                'cardExpiry.regex' => 'Please enter a valid expiration date (MM/YY)',
-                'cardCvv.required' => 'CVV is required',
-                'cardCvv.regex' => 'Please enter a valid CVV (3-4 digits)',
-            ]);
-        } elseif ($this->paymentMethod === 'ach') {
-            $this->validate([
-                'bankName' => 'required|string|max:100',
-                'accountNumber' => ['required', 'string', 'regex:/^\d{8,17}$/'],
-                'routingNumber' => ['required', 'string', 'regex:/^\d{9}$/'],
-                'achAuthorization' => ['accepted'],
-            ], [
-                'bankName.required' => 'Bank name is required',
-                'accountNumber.required' => 'Account number is required',
-                'accountNumber.regex' => 'Please enter a valid account number (8-17 digits)',
-                'routingNumber.required' => 'Routing number is required',
-                'routingNumber.regex' => 'Please enter a valid routing number (9 digits)',
-                'achAuthorization.accepted' => 'You must authorize the recurring ACH debits to continue',
-            ]);
+        // Skip card/ACH field validation when using a saved payment method
+        if (! $this->selectedSavedMethodId) {
+            if ($this->paymentMethod === 'credit_card') {
+                $this->validate([
+                    'cardNumber' => ['required', 'string', 'regex:/^[0-9\s]{13,19}$/'],
+                    'cardExpiry' => ['required', 'string', 'regex:/^(0[1-9]|1[0-2])\/\d{2}$/'],
+                    'cardCvv' => ['required', 'string', 'regex:/^\d{3,4}$/'],
+                ], [
+                    'cardNumber.required' => 'Credit card number is required',
+                    'cardNumber.regex' => 'Please enter a valid credit card number',
+                    'cardExpiry.required' => 'Expiration date is required',
+                    'cardExpiry.regex' => 'Please enter a valid expiration date (MM/YY)',
+                    'cardCvv.required' => 'CVV is required',
+                    'cardCvv.regex' => 'Please enter a valid CVV (3-4 digits)',
+                ]);
+            } elseif ($this->paymentMethod === 'ach') {
+                $this->validate([
+                    'bankName' => 'required|string|max:100',
+                    'accountNumber' => ['required', 'string', 'regex:/^\d{8,17}$/'],
+                    'routingNumber' => ['required', 'string', 'regex:/^\d{9}$/'],
+                    'achAuthorization' => ['accepted'],
+                ], [
+                    'bankName.required' => 'Bank name is required',
+                    'accountNumber.required' => 'Account number is required',
+                    'accountNumber.regex' => 'Please enter a valid account number (8-17 digits)',
+                    'routingNumber.required' => 'Routing number is required',
+                    'routingNumber.regex' => 'Please enter a valid routing number (9 digits)',
+                    'achAuthorization.accepted' => 'You must authorize the recurring ACH debits to continue',
+                ]);
+            }
         }
 
         // For payment plans, create setup intent for saving payment method (MiPaymentChoice)
         if ($this->isPaymentPlan) {
-            $setupIntentResult = $this->paymentService->createSetupIntent($this->clientInfo);
+            // When using a saved method, populate details from the saved method
+            if ($this->selectedSavedMethodId) {
+                $method = $this->savedPaymentMethods->firstWhere('id', $this->selectedSavedMethodId);
 
-            if (! $setupIntentResult['success']) {
-                $this->addError('payment_method', 'Failed to initialize payment plan setup: '.$setupIntentResult['error']);
+                if (! $method) {
+                    $this->addError('payment_method', 'Selected payment method not found.');
 
-                return;
+                    return;
+                }
+
+                $this->paymentMethodDetails = [
+                    'type' => $method->type === \App\Models\CustomerPaymentMethod::TYPE_CARD ? 'card_token' : 'ach_token',
+                    'saved_method_id' => $method->id,
+                    'mpc_token' => $method->mpc_token,
+                    'last_four' => $method->last_four,
+                    'ready_for_tokenization' => false, // Already tokenized
+                ];
+            } else {
+                $setupIntentResult = $this->paymentService->createSetupIntent($this->clientInfo);
+
+                if (! $setupIntentResult['success']) {
+                    $this->addError('payment_method', 'Failed to initialize payment plan setup: '.$setupIntentResult['error']);
+
+                    return;
+                }
+
+                $this->paymentMethodDetails = [
+                    'type' => $this->paymentMethod === 'credit_card' ? 'card_token' : 'ach_token',
+                    'customer_id' => $setupIntentResult['customer_id'],
+                    'ready_for_tokenization' => true,
+                ];
             }
-
-            $this->paymentMethodDetails = [
-                'type' => $this->paymentMethod === 'credit_card' ? 'card_token' : 'ach_token',
-                'customer_id' => $setupIntentResult['customer_id'],
-                'ready_for_tokenization' => true,
-            ];
         } else {
             // Store payment method details (will be tokenized with MiPaymentChoice)
             $this->paymentMethodDetails = [
@@ -200,6 +221,6 @@ trait HasPaymentPlans
 
         // Proceed to confirmation
         $this->goToStep(Steps::CONFIRMATION);
-        $this->transactionId = 'mpc_plan_'.uniqid();
+        $this->transactionId = 'mpc_plan_'.bin2hex(random_bytes(16));
     }
 }

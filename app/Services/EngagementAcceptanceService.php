@@ -273,7 +273,7 @@ class EngagementAcceptanceService
         if ($year !== null && $year >= self::YEAR_BASED_THRESHOLD) {
             // Dynamic lookup: query Engagement_Type for {YEAR}{SUFFIX}
             $suffix = self::YEAR_BASED_TEMPLATE_SUFFIX[$templateId];
-            $typeId = $year . $suffix;
+            $typeId = $year.$suffix;
 
             $type = DB::connection($connection)->selectOne(
                 'SELECT engagement_type_KEY FROM Engagement_Type WHERE engagement_type_id = ?',

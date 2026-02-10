@@ -15,6 +15,7 @@ use App\Repositories\PaymentRepository;
 use App\Services\CustomerPaymentMethodService;
 use App\Services\PaymentPlanCalculator;
 use App\Services\PaymentService;
+use App\Support\Money;
 use Flux\Flux;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -256,7 +257,7 @@ class PaymentFlow extends Component
 
         // Calculate credit card fee
         if ($method === 'credit_card') {
-            $this->creditCardFee = $this->paymentAmount * config('payment-fees.credit_card_rate');
+            $this->creditCardFee = Money::multiplyDollars($this->paymentAmount, config('payment-fees.credit_card_rate'));
         } else {
             $this->creditCardFee = 0;
         }
@@ -270,6 +271,9 @@ class PaymentFlow extends Component
             $this->planDuration = 3;
             $this->calculatePaymentPlanFee();
             $this->calculateDownPaymentAndSchedule();
+
+            // Load saved payment methods so they can be offered during plan auth
+            $this->loadSavedPaymentMethods();
             // Stay on payment method step to show plan selection
         } else {
             $this->isPaymentPlan = false;
@@ -421,7 +425,7 @@ class PaymentFlow extends Component
 
         // Generate a new transaction ID for each payment attempt
         // This prevents duplicate transaction rejection by the gateway
-        $this->transactionId = ($this->isPaymentPlan ? 'plan_' : 'txn_').uniqid();
+        $this->transactionId = ($this->isPaymentPlan ? 'plan_' : 'txn_').bin2hex(random_bytes(16));
 
         // Prepare payment data
         $paymentData = [
@@ -454,7 +458,57 @@ class PaymentFlow extends Component
 
             if ($this->isPaymentPlan) {
                 // For payment plans, tokenize card/check and save payment method
-                if ($this->paymentMethod === 'credit_card') {
+                if ($this->selectedSavedMethodId) {
+                    // Use existing saved payment method for the plan
+                    $savedMethod = $this->savedPaymentMethods->firstWhere('id', $this->selectedSavedMethodId);
+
+                    if (! $savedMethod) {
+                        $this->addError('payment', 'Selected payment method not found.');
+
+                        return;
+                    }
+
+                    $token = $savedMethod->mpc_token;
+                    $lastFour = $savedMethod->last_four;
+                    $methodType = $savedMethod->type === \App\Models\CustomerPaymentMethod::TYPE_CARD ? 'card' : 'ach';
+
+                    // For saved ACH methods, retrieve bank details for down payment processing
+                    $paymentMethodData = null;
+                    if ($methodType === 'ach') {
+                        $bankDetails = $savedMethod->getBankDetails();
+                        if ($bankDetails) {
+                            $paymentMethodData = [
+                                'type' => 'ach',
+                                'routing' => $bankDetails['routing_number'],
+                                'account' => $bankDetails['account_number'],
+                                'account_type' => $savedMethod->account_type ?? 'checking',
+                                'name' => $this->clientInfo['client_name'],
+                            ];
+                        }
+                    }
+
+                    // Create the payment plan with saved method
+                    $paymentResult = $this->paymentService->createPaymentPlan(
+                        [
+                            'amount' => $this->paymentAmount,
+                            'planFee' => $this->paymentPlanFee,
+                            'planDuration' => $this->planDuration,
+                            'paymentSchedule' => $this->paymentSchedule,
+                            'invoices' => $paymentData['invoices'],
+                        ],
+                        $this->clientInfo,
+                        $token,
+                        $methodType,
+                        $lastFour,
+                        $paymentMethodData,
+                        false // Don't split down payment (public flow)
+                    );
+
+                    // Store the plan ID for confirmation display
+                    if ($paymentResult && $paymentResult['success']) {
+                        $this->transactionId = $paymentResult['plan_id'];
+                    }
+                } elseif ($this->paymentMethod === 'credit_card') {
                     // Create reusable card token
                     $token = $customer->tokenizeCard([
                         'number' => str_replace(' ', '', $this->cardNumber),
@@ -475,7 +529,7 @@ class PaymentFlow extends Component
                         'name' => $this->clientInfo['client_name'],
                         'account_type' => ucfirst($this->bankAccountType),
                     ]);
-                    $token = $tokenResult['token'] ?? 'ach_local_'.uniqid();
+                    $token = $tokenResult['token'] ?? 'ach_local_'.bin2hex(random_bytes(16));
                     $lastFour = substr($this->accountNumber, -4);
                 }
 

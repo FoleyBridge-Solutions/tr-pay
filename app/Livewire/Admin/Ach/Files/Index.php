@@ -103,7 +103,7 @@ class Index extends Component
         }
 
         // Check if Kotapay API is enabled
-        if (! config('kotapay.api.enabled')) {
+        if (! config('kotapay.enabled')) {
             Flux::toast('Kotapay API is not enabled. Please configure API credentials in .env', variant: 'danger');
 
             return;

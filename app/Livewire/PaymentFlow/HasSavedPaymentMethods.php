@@ -215,6 +215,18 @@ trait HasSavedPaymentMethods
     }
 
     /**
+     * Find the currently selected saved payment method.
+     */
+    protected function findSelectedSavedMethod(): ?\App\Models\CustomerPaymentMethod
+    {
+        if (! $this->selectedSavedMethodId) {
+            return null;
+        }
+
+        return $this->savedPaymentMethods->firstWhere('id', $this->selectedSavedMethodId);
+    }
+
+    /**
      * Process payment using a saved payment method.
      */
     protected function processPaymentWithSavedMethod(): void
@@ -225,7 +237,7 @@ trait HasSavedPaymentMethods
             return;
         }
 
-        $method = $this->savedPaymentMethods->firstWhere('id', $this->selectedSavedMethodId);
+        $method = $this->findSelectedSavedMethod();
 
         if (! $method) {
             $this->addError('payment', 'Selected payment method not found.');
@@ -242,13 +254,15 @@ trait HasSavedPaymentMethods
                 $totalAmount += $this->creditCardFee;
             }
 
+            $description = "Payment for {$this->clientInfo['client_name']} - ".count($this->selectedInvoices).' invoice(s)';
+
             // Charge using saved method
             $paymentResult = $this->paymentService->chargeWithSavedMethod(
                 $customer,
                 $method,
                 $totalAmount,
                 [
-                    'description' => "Payment for {$this->clientInfo['client_name']} - ".count($this->selectedInvoices).' invoice(s)',
+                    'description' => $description,
                 ]
             );
 
@@ -260,14 +274,27 @@ trait HasSavedPaymentMethods
 
             $this->transactionId = $paymentResult['transaction_id'];
 
-            // Record the payment
+            // Log successful payment
+            Log::info('Payment processed successfully', [
+                'transaction_id' => $this->transactionId,
+                'client_id' => $this->clientInfo['client_id'],
+                'amount' => $this->paymentAmount,
+                'payment_method' => $this->paymentMethod,
+                'saved_method_id' => $this->selectedSavedMethodId,
+            ]);
+
+            // Record the payment with description and vendor metadata
             $this->paymentService->recordPayment([
                 'amount' => $this->paymentAmount,
                 'fee' => $this->creditCardFee,
                 'paymentMethod' => $this->paymentMethod,
                 'lastFour' => $method->last_four,
                 'invoices' => $this->selectedInvoices,
-            ], $this->clientInfo, $this->transactionId);
+                'description' => $description,
+            ], $this->clientInfo, $this->transactionId, [
+                'payment_vendor' => $paymentResult['payment_vendor'] ?? null,
+                'vendor_transaction_id' => $paymentResult['transaction_id'] ?? null,
+            ]);
 
             // Write to PracticeCS if enabled
             if (config('practicecs.payment_integration.enabled')) {
@@ -292,6 +319,50 @@ trait HasSavedPaymentMethods
             $this->addError('payment', 'Payment processing failed: '.$e->getMessage());
             Log::error('Payment with saved method failed', [
                 'method_id' => $this->selectedSavedMethodId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return;
+        }
+
+        // Send payment receipt email
+        try {
+            $clientEmail = $this->clientInfo['email'] ?? null;
+
+            if ($clientEmail) {
+                $paymentData = [
+                    'amount' => $this->paymentAmount,
+                    'paymentMethod' => $this->paymentMethod,
+                    'fee' => $this->creditCardFee,
+                    'invoices' => collect($this->selectedInvoices)->map(function ($invoiceNumber) {
+                        $invoice = collect($this->openInvoices)->firstWhere('invoice_number', $invoiceNumber);
+
+                        return $invoice ? [
+                            'invoice_number' => $invoice['invoice_number'],
+                            'description' => $invoice['description'],
+                            'amount' => $invoice['open_amount'],
+                        ] : null;
+                    })->filter()->values()->toArray(),
+                ];
+
+                \Illuminate\Support\Facades\Mail::to($clientEmail)
+                    ->send(new \App\Mail\PaymentReceipt($paymentData, $this->clientInfo, $this->transactionId));
+
+                Log::info('Payment receipt email sent', [
+                    'transaction_id' => $this->transactionId,
+                    'client_id' => $this->clientInfo['client_id'],
+                    'amount' => $this->paymentAmount,
+                ]);
+            } else {
+                Log::warning('Payment receipt email not sent - no client email on file', [
+                    'transaction_id' => $this->transactionId,
+                    'client_id' => $this->clientInfo['client_id'],
+                ]);
+            }
+        } catch (\Exception $e) {
+            // Log email failure but don't block payment completion
+            Log::error('Failed to send payment receipt email', [
+                'transaction_id' => $this->transactionId,
                 'error' => $e->getMessage(),
             ]);
         }

@@ -21,10 +21,10 @@ class KotapayTestCommand extends Command
         $this->info('Configuration:');
         $this->table(['Setting', 'Value'], [
             ['Environment', config('kotapay.environment')],
-            ['API Enabled', config('kotapay.api.enabled') ? 'Yes' : 'No'],
+            ['API Enabled', config('kotapay.enabled') ? 'Yes' : 'No'],
             ['API URL', 'https://api.kotapay.com'],
-            ['Client ID', $this->maskString(config('kotapay.api.client_id'))],
-            ['Username', config('kotapay.api.username') ?: '(not set)'],
+            ['Client ID', $this->maskString(config('kotapay.client_id'))],
+            ['Username', config('kotapay.username') ?: '(not set)'],
         ]);
         $this->newLine();
 

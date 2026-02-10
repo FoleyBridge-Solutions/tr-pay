@@ -2,6 +2,9 @@
 
 namespace App\Livewire\Admin\RecurringPayments;
 
+use App\Livewire\Admin\Concerns\HasSavedPaymentMethodSelection;
+use App\Livewire\Admin\Concerns\SearchesClients;
+use App\Livewire\Admin\Concerns\ValidatesPaymentMethod;
 use App\Models\AdminActivity;
 use App\Models\Customer;
 use App\Models\CustomerPaymentMethod;
@@ -9,7 +12,6 @@ use App\Models\RecurringPayment;
 use Carbon\Carbon;
 use Flux\Flux;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
@@ -24,6 +26,10 @@ use Livewire\Component;
 #[Layout('layouts.admin')]
 class Create extends Component
 {
+    use HasSavedPaymentMethodSelection;
+    use SearchesClients;
+    use ValidatesPaymentMethod;
+
     // Client selection
     public string $searchType = 'name'; // 'name', 'client_id', or 'tax_id'
 
@@ -54,7 +60,7 @@ class Create extends Component
 
     // Payment method
     #[Validate('required|in:card,ach,saved,none')]
-    public string $paymentMethodType = 'card';
+    public string $paymentMethodType = CustomerPaymentMethod::TYPE_CARD;
 
     // Saved payment methods
     public ?int $savedPaymentMethodId = null;
@@ -97,76 +103,6 @@ class Create extends Component
     }
 
     /**
-     * Search for clients.
-     */
-    public function searchClients(): void
-    {
-        $this->searchResults = [];
-        $this->errorMessage = null;
-
-        if (strlen($this->searchQuery) < 2) {
-            return;
-        }
-
-        try {
-            if ($this->searchType === 'client_id') {
-                $result = DB::connection('sqlsrv')->select('
-                    SELECT TOP 20
-                        client_KEY,
-                        client_id,
-                        description AS client_name,
-                        individual_first_name,
-                        individual_last_name,
-                        federal_tin
-                    FROM Client
-                    WHERE client_id LIKE ?
-                    ORDER BY description
-                ', ["%{$this->searchQuery}%"]);
-            } elseif ($this->searchType === 'tax_id') {
-                // Search by last 4 digits of SSN/EIN (federal_tin)
-                $last4 = preg_replace('/\D/', '', $this->searchQuery);
-                if (strlen($last4) !== 4) {
-                    $this->errorMessage = 'Please enter exactly 4 digits for Tax ID search.';
-
-                    return;
-                }
-                $result = DB::connection('sqlsrv')->select('
-                    SELECT TOP 20
-                        client_KEY,
-                        client_id,
-                        description AS client_name,
-                        individual_first_name,
-                        individual_last_name,
-                        federal_tin
-                    FROM Client
-                    WHERE RIGHT(REPLACE(REPLACE(federal_tin, \'-\', \'\'), \' \', \'\'), 4) = ?
-                    ORDER BY description
-                ', [$last4]);
-            } else {
-                $result = DB::connection('sqlsrv')->select('
-                    SELECT TOP 20
-                        client_KEY,
-                        client_id,
-                        description AS client_name,
-                        individual_first_name,
-                        individual_last_name,
-                        federal_tin
-                    FROM Client
-                    WHERE description LIKE ?
-                       OR individual_last_name LIKE ?
-                       OR individual_first_name LIKE ?
-                    ORDER BY description
-                ', ["%{$this->searchQuery}%", "%{$this->searchQuery}%", "%{$this->searchQuery}%"]);
-            }
-
-            $this->searchResults = array_map(fn ($r) => (array) $r, $result);
-        } catch (\Exception $e) {
-            Log::error('Client search failed', ['error' => $e->getMessage()]);
-            $this->errorMessage = 'Failed to search clients. Please try again.';
-        }
-    }
-
-    /**
      * Select a client.
      */
     public function selectClient(int $clientKey): void
@@ -186,41 +122,6 @@ class Create extends Component
     }
 
     /**
-     * Load saved payment methods for the selected client.
-     */
-    protected function loadSavedPaymentMethods(): void
-    {
-        if (! $this->selectedClient) {
-            $this->savedPaymentMethods = collect();
-
-            return;
-        }
-
-        $customer = Customer::where('client_key', $this->selectedClient['client_KEY'])->first();
-
-        if ($customer) {
-            $this->savedPaymentMethods = $customer->customerPaymentMethods()
-                ->orderByDesc('is_default')
-                ->orderByDesc('created_at')
-                ->get();
-        } else {
-            $this->savedPaymentMethods = collect();
-        }
-    }
-
-    /**
-     * Get the selected saved payment method.
-     */
-    public function getSelectedSavedMethod(): ?CustomerPaymentMethod
-    {
-        if (! $this->savedPaymentMethodId) {
-            return null;
-        }
-
-        return $this->savedPaymentMethods->firstWhere('id', $this->savedPaymentMethodId);
-    }
-
-    /**
      * Clear selected client.
      */
     public function clearClient(): void
@@ -231,7 +132,7 @@ class Create extends Component
 
         // Reset to card if was on saved
         if ($this->paymentMethodType === 'saved') {
-            $this->paymentMethodType = 'card';
+            $this->paymentMethodType = CustomerPaymentMethod::TYPE_CARD;
         }
     }
 
@@ -245,65 +146,42 @@ class Create extends Component
     }
 
     /**
-     * Validate payment method fields.
+     * Get the supported payment method types.
+     *
+     * Recurring payments support 'none' for pending entries without a payment method.
      */
-    protected function validatePaymentMethod(): bool
+    protected function supportedPaymentTypes(): array
     {
-        // No payment method selected - this is valid for pending recurring payments
-        if ($this->paymentMethodType === 'none') {
-            return true;
-        }
+        return ['none', 'saved', CustomerPaymentMethod::TYPE_CARD, CustomerPaymentMethod::TYPE_ACH];
+    }
 
-        if ($this->paymentMethodType === 'saved') {
-            if (! $this->savedPaymentMethodId) {
-                $this->errorMessage = 'Please select a saved payment method.';
+    /**
+     * Whether card validation requires CVV and cardholder name.
+     *
+     * Recurring payments don't require these fields.
+     */
+    protected function requireCardCvvAndName(): bool
+    {
+        return false;
+    }
 
-                return false;
-            }
+    /**
+     * Whether ACH validation requires account holder name.
+     *
+     * Recurring payments don't require account name.
+     */
+    protected function requireAccountName(): bool
+    {
+        return false;
+    }
 
-            $method = $this->savedPaymentMethods->firstWhere('id', $this->savedPaymentMethodId);
-            if (! $method) {
-                $this->errorMessage = 'Selected payment method not found.';
-
-                return false;
-            }
-
-            // Warn about expired cards but allow selection
-            if ($method->isExpired()) {
-                $this->errorMessage = 'The selected card has expired. Please choose a different payment method.';
-
-                return false;
-            }
-
-            return true;
-        }
-
-        if ($this->paymentMethodType === 'card') {
-            $cardNumber = preg_replace('/\D/', '', $this->cardNumber);
-            if (strlen($cardNumber) < 13 || strlen($cardNumber) > 19) {
-                $this->errorMessage = 'Please enter a valid card number.';
-
-                return false;
-            }
-            if (empty($this->cardExpiry) || ! preg_match('/^\d{2}\/\d{2}$/', $this->cardExpiry)) {
-                $this->errorMessage = 'Please enter a valid expiry date (MM/YY).';
-
-                return false;
-            }
-        } else {
-            $routing = preg_replace('/\D/', '', $this->routingNumber);
-            if (strlen($routing) !== 9) {
-                $this->errorMessage = 'Please enter a valid 9-digit routing number.';
-
-                return false;
-            }
-            if (empty($this->accountNumber) || strlen($this->accountNumber) < 4) {
-                $this->errorMessage = 'Please enter a valid account number.';
-
-                return false;
-            }
-        }
-
+    /**
+     * Whether to check expiry on saved payment methods.
+     *
+     * Recurring payments should reject expired cards.
+     */
+    protected function checkSavedMethodExpiry(): bool
+    {
         return true;
     }
 
@@ -452,9 +330,9 @@ class Create extends Component
             throw new \Exception('Saved payment method not found.');
         }
 
-        if ($this->paymentMethodType === 'card') {
+        if ($this->paymentMethodType === CustomerPaymentMethod::TYPE_CARD) {
             $data = [
-                'type' => 'card',
+                'type' => CustomerPaymentMethod::TYPE_CARD,
                 'number' => preg_replace('/\D/', '', $this->cardNumber),
                 'expiry' => $this->cardExpiry,
                 'cvv' => $this->cardCvv,
@@ -462,7 +340,7 @@ class Create extends Component
             ];
         } else {
             $data = [
-                'type' => 'ach',
+                'type' => CustomerPaymentMethod::TYPE_ACH,
                 'routing' => preg_replace('/\D/', '', $this->routingNumber),
                 'account' => preg_replace('/\D/', '', $this->accountNumber),
                 'account_type' => $this->accountType,
@@ -471,30 +349,6 @@ class Create extends Component
         }
 
         return encrypt(json_encode($data));
-    }
-
-    /**
-     * Get last 4 digits of payment method.
-     */
-    protected function getLastFour(): ?string
-    {
-        if ($this->paymentMethodType === 'none') {
-            return null;
-        }
-
-        if ($this->paymentMethodType === 'saved') {
-            $method = $this->getSelectedSavedMethod();
-
-            return $method?->last_four ?? '****';
-        }
-
-        if ($this->paymentMethodType === 'card') {
-            $number = preg_replace('/\D/', '', $this->cardNumber);
-
-            return substr($number, -4);
-        } else {
-            return substr($this->accountNumber, -4);
-        }
     }
 
     /**
@@ -510,7 +364,7 @@ class Create extends Component
         if ($this->paymentMethodType === 'saved') {
             $method = $this->getSelectedSavedMethod();
 
-            return $method?->type ?? 'card';
+            return $method?->type ?? CustomerPaymentMethod::TYPE_CARD;
         }
 
         return $this->paymentMethodType;
@@ -565,7 +419,7 @@ class Create extends Component
             'savedPaymentMethodId',
         ]);
         $this->frequency = 'monthly';
-        $this->paymentMethodType = 'card';
+        $this->paymentMethodType = CustomerPaymentMethod::TYPE_CARD;
         $this->accountType = 'checking';
         $this->startDate = now()->format('Y-m-d');
         $this->savedPaymentMethods = collect();

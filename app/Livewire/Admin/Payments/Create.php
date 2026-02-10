@@ -2,6 +2,10 @@
 
 namespace App\Livewire\Admin\Payments;
 
+use App\Livewire\Admin\Concerns\HasInvoiceManagement;
+use App\Livewire\Admin\Concerns\HasSavedPaymentMethodSelection;
+use App\Livewire\Admin\Concerns\SearchesClients;
+use App\Livewire\Admin\Concerns\ValidatesPaymentMethod;
 use App\Models\AdminActivity;
 use App\Models\Customer;
 use App\Models\CustomerPaymentMethod;
@@ -34,6 +38,11 @@ use Livewire\Component;
 #[Layout('layouts.admin')]
 class Create extends Component
 {
+    use HasInvoiceManagement;
+    use HasSavedPaymentMethodSelection;
+    use SearchesClients;
+    use ValidatesPaymentMethod;
+
     // Wizard state
     public int $currentStep = 1;
 
@@ -152,7 +161,7 @@ class Create extends Component
         if ($this->paymentMethodType === 'saved' && $this->savedPaymentMethodId) {
             $savedMethod = $this->savedPaymentMethods->firstWhere('id', $this->savedPaymentMethodId);
 
-            return $savedMethod && $savedMethod->type === 'card';
+            return $savedMethod && $savedMethod->type === CustomerPaymentMethod::TYPE_CARD;
         }
 
         return false;
@@ -224,88 +233,6 @@ class Create extends Component
     }
 
     /**
-     * Get the selected saved payment method.
-     */
-    public function getSelectedSavedMethod(): ?CustomerPaymentMethod
-    {
-        if (! $this->savedPaymentMethodId) {
-            return null;
-        }
-
-        return $this->savedPaymentMethods->firstWhere('id', $this->savedPaymentMethodId);
-    }
-
-    /**
-     * Search for clients.
-     */
-    public function searchClients(): void
-    {
-        $this->searchResults = [];
-        $this->errorMessage = null;
-
-        if (strlen($this->searchQuery) < 2) {
-            return;
-        }
-
-        try {
-            if ($this->searchType === 'client_id') {
-                $result = DB::connection('sqlsrv')->select('
-                    SELECT TOP 20
-                        client_KEY,
-                        client_id,
-                        description AS client_name,
-                        individual_first_name,
-                        individual_last_name,
-                        federal_tin
-                    FROM Client
-                    WHERE client_id LIKE ?
-                    ORDER BY description
-                ', ["%{$this->searchQuery}%"]);
-            } elseif ($this->searchType === 'tax_id') {
-                // Search by last 4 digits of SSN/EIN (federal_tin)
-                $last4 = preg_replace('/\D/', '', $this->searchQuery);
-                if (strlen($last4) !== 4) {
-                    $this->errorMessage = 'Please enter exactly 4 digits for Tax ID search.';
-
-                    return;
-                }
-                $result = DB::connection('sqlsrv')->select('
-                    SELECT TOP 20
-                        client_KEY,
-                        client_id,
-                        description AS client_name,
-                        individual_first_name,
-                        individual_last_name,
-                        federal_tin
-                    FROM Client
-                    WHERE RIGHT(REPLACE(REPLACE(federal_tin, \'-\', \'\'), \' \', \'\'), 4) = ?
-                    ORDER BY description
-                ', [$last4]);
-            } else {
-                $result = DB::connection('sqlsrv')->select('
-                    SELECT TOP 20
-                        client_KEY,
-                        client_id,
-                        description AS client_name,
-                        individual_first_name,
-                        individual_last_name,
-                        federal_tin
-                    FROM Client
-                    WHERE description LIKE ?
-                       OR individual_last_name LIKE ?
-                       OR individual_first_name LIKE ?
-                    ORDER BY description
-                ', ["%{$this->searchQuery}%", "%{$this->searchQuery}%", "%{$this->searchQuery}%"]);
-            }
-
-            $this->searchResults = array_map(fn ($r) => (array) $r, $result);
-        } catch (\Exception $e) {
-            Log::error('Client search failed', ['error' => $e->getMessage()]);
-            $this->errorMessage = 'Failed to search clients. Please try again.';
-        }
-    }
-
-    /**
      * Select a client and load their invoices.
      */
     public function selectClient(int $clientKey): void
@@ -355,24 +282,6 @@ class Create extends Component
     }
 
     /**
-     * Load open invoices for the selected client.
-     */
-    protected function loadInvoices(): void
-    {
-        if (! $this->selectedClient) {
-            return;
-        }
-
-        try {
-            $invoices = $this->paymentRepo->getClientOpenInvoices($this->selectedClient['client_KEY']);
-            $this->availableInvoices = $invoices;
-        } catch (\Exception $e) {
-            Log::error('Failed to load invoices', ['error' => $e->getMessage()]);
-            $this->availableInvoices = [];
-        }
-    }
-
-    /**
      * Load pending EXP engagements (fee requests) for the selected client.
      */
     protected function loadPendingEngagements(): void
@@ -391,57 +300,6 @@ class Create extends Component
             Log::error('Failed to load pending engagements', ['error' => $e->getMessage()]);
             $this->pendingEngagements = [];
         }
-    }
-
-    /**
-     * Load saved payment methods for the client.
-     */
-    protected function loadSavedPaymentMethods(): void
-    {
-        if (! $this->selectedClient) {
-            $this->savedPaymentMethods = collect();
-
-            return;
-        }
-
-        $customer = Customer::where('client_key', $this->selectedClient['client_KEY'])->first();
-
-        if ($customer) {
-            $this->savedPaymentMethods = $customer->customerPaymentMethods;
-        } else {
-            $this->savedPaymentMethods = collect();
-        }
-    }
-
-    /**
-     * Toggle invoice selection.
-     */
-    public function toggleInvoice(string $ledgerEntryKey): void
-    {
-        $key = (string) $ledgerEntryKey;
-
-        if (in_array($key, $this->selectedInvoices, true)) {
-            $this->selectedInvoices = array_values(array_filter(
-                $this->selectedInvoices,
-                fn ($k) => $k !== $key
-            ));
-        } else {
-            $this->selectedInvoices[] = $key;
-        }
-
-        $this->calculateTotals();
-    }
-
-    /**
-     * Select all invoices.
-     */
-    public function selectAllInvoices(): void
-    {
-        $this->selectedInvoices = [];
-        foreach ($this->availableInvoices as $invoice) {
-            $this->selectedInvoices[] = (string) $invoice['ledger_entry_KEY'];
-        }
-        $this->calculateTotals();
     }
 
     /**
@@ -696,69 +554,6 @@ class Create extends Component
     }
 
     /**
-     * Validate payment method fields.
-     */
-    protected function validatePaymentMethod(): bool
-    {
-        if ($this->paymentMethodType === 'saved') {
-            if (! $this->savedPaymentMethodId) {
-                $this->errorMessage = 'Please select a saved payment method.';
-
-                return false;
-            }
-            $method = $this->savedPaymentMethods->firstWhere('id', $this->savedPaymentMethodId);
-            if (! $method) {
-                $this->errorMessage = 'Selected payment method not found.';
-
-                return false;
-            }
-
-            return true;
-        }
-
-        if ($this->paymentMethodType === 'card') {
-            if (empty($this->cardNumber) || strlen(preg_replace('/\D/', '', $this->cardNumber)) < 13) {
-                $this->errorMessage = 'Please enter a valid card number.';
-
-                return false;
-            }
-            if (empty($this->cardExpiry) || ! preg_match('/^\d{2}\/\d{2}$/', $this->cardExpiry)) {
-                $this->errorMessage = 'Please enter a valid expiry date (MM/YY).';
-
-                return false;
-            }
-            if (empty($this->cardCvv) || strlen($this->cardCvv) < 3) {
-                $this->errorMessage = 'Please enter a valid CVV.';
-
-                return false;
-            }
-            if (empty($this->cardName)) {
-                $this->errorMessage = 'Please enter the name on card.';
-
-                return false;
-            }
-        } else {
-            if (empty($this->routingNumber) || strlen($this->routingNumber) !== 9) {
-                $this->errorMessage = 'Please enter a valid 9-digit routing number.';
-
-                return false;
-            }
-            if (empty($this->accountNumber) || strlen($this->accountNumber) < 4) {
-                $this->errorMessage = 'Please enter a valid account number.';
-
-                return false;
-            }
-            if (empty($this->accountName)) {
-                $this->errorMessage = 'Please enter the account holder name.';
-
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
      * Process or schedule the payment.
      */
     public function processPayment(QuickPaymentsService $quickPayments, PracticeCsPaymentWriter $practiceWriter): void
@@ -808,9 +603,9 @@ class Create extends Component
         }
 
         // Generate transaction ID
-        $this->transactionId = 'sch_'.bin2hex(random_bytes(6));
+        $this->transactionId = 'sch_'.bin2hex(random_bytes(16));
 
-        $isCard = $savedMethod->type === 'card';
+        $isCard = $savedMethod->type === CustomerPaymentMethod::TYPE_CARD;
         $fee = $isCard ? $this->getCreditCardFee() : 0;
         $baseAmount = $this->getBasePaymentAmount();
 
@@ -926,7 +721,7 @@ class Create extends Component
     protected function processImmediatePayment(QuickPaymentsService $quickPayments, PracticeCsPaymentWriter $practiceWriter): void
     {
         // Generate transaction ID
-        $this->transactionId = 'txn_'.bin2hex(random_bytes(6));
+        $this->transactionId = 'txn_'.bin2hex(random_bytes(16));
 
         // Determine if using saved method or new details
         if ($this->paymentMethodType === 'saved') {
@@ -951,11 +746,12 @@ class Create extends Component
             throw new \Exception('Customer not found.');
         }
 
-        $isCard = $savedMethod->type === 'card';
+        $isCard = $savedMethod->type === CustomerPaymentMethod::TYPE_CARD;
         $chargeAmount = $isCard ? $this->getTotalCharge() : $this->paymentAmount;
 
         // Charge using the saved token
-        $chargeResponse = $customer->charge($chargeAmount, $savedMethod->mpc_token, [
+        $chargeResponse = $customer->charge(Money::toCents($chargeAmount), [
+            'payment_method' => $savedMethod->mpc_token,
             'description' => 'Admin payment - '.count($this->selectedInvoices).' invoice(s)',
         ]);
 
@@ -1176,7 +972,7 @@ class Create extends Component
         $remainingCents = Money::toCents($this->getBasePaymentAmount());
 
         $selectedInvoiceDetails = array_filter($this->availableInvoices, function ($inv) {
-            return in_array((string) $inv['ledger_entry_KEY'], $this->selectedInvoices);
+            return in_array((string) $inv['ledger_entry_KEY'], $this->selectedInvoices, true);
         });
         usort($selectedInvoiceDetails, fn ($a, $b) => $a['ledger_entry_KEY'] <=> $b['ledger_entry_KEY']);
 
@@ -1354,26 +1150,6 @@ class Create extends Component
                 }
             }
         }
-    }
-
-    /**
-     * Get last 4 digits of payment method.
-     */
-    protected function getLastFour(): string
-    {
-        if ($this->paymentMethodType === 'saved') {
-            $method = $this->getSelectedSavedMethod();
-
-            return $method?->last_four ?? '****';
-        }
-
-        if ($this->paymentMethodType === 'card') {
-            $cleaned = preg_replace('/\D/', '', $this->cardNumber);
-
-            return substr($cleaned, -4);
-        }
-
-        return substr($this->accountNumber, -4);
     }
 
     /**
