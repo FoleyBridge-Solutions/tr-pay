@@ -483,6 +483,7 @@ class PaymentFlow extends Component
                                 'account' => $bankDetails['account_number'],
                                 'account_type' => $savedMethod->account_type ?? 'checking',
                                 'name' => $this->clientInfo['client_name'],
+                                'is_business' => $savedMethod->is_business ?? false,
                             ];
                         }
                     }
@@ -548,6 +549,7 @@ class PaymentFlow extends Component
                         'account' => $this->accountNumber,
                         'account_type' => $this->bankAccountType,
                         'name' => $this->clientInfo['client_name'],
+                        'is_business' => (bool) $this->isBusiness,
                     ];
 
                 // Create the payment plan with 30% down payment charged immediately
@@ -613,6 +615,7 @@ class PaymentFlow extends Component
                             'account_number' => $this->accountNumber,
                             'account_type' => ucfirst($this->bankAccountType),
                             'account_name' => $this->clientInfo['client_name'],
+                            'is_business' => (bool) $this->isBusiness,
                         ],
                         $this->paymentAmount,
                         [

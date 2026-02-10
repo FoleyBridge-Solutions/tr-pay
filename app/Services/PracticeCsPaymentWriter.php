@@ -6,6 +6,7 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * PracticeCsPaymentWriter
@@ -53,6 +54,10 @@ class PracticeCsPaymentWriter
             // Step 4: Insert Ledger_Entry
             $entryDate = now()->startOfDay(); // Must be midnight per CHECK constraint
 
+            // Truncate reference to 30 chars (nvarchar(30) column limit)
+            // Full transaction ID is preserved in internal_comments (nvarchar(MAX))
+            $reference = Str::limit($paymentData['reference'], 30, '');
+
             DB::connection($connection)->insert('
                 INSERT INTO Ledger_Entry (
                     ledger_entry_KEY,
@@ -84,7 +89,7 @@ class PracticeCsPaymentWriter
                 $paymentData['ledger_type_KEY'],
                 $paymentData['client_KEY'],
                 $entryDate,
-                $paymentData['reference'],
+                $reference,
                 -abs($paymentData['amount']), // MUST be negative
                 $paymentData['comments'],
                 $paymentData['internal_comments'],
@@ -246,6 +251,10 @@ class PracticeCsPaymentWriter
             // Insert memo entry
             $entryDate = now()->startOfDay();
 
+            // Truncate reference to 30 chars (nvarchar(30) column limit)
+            // Full transaction ID is preserved in internal_comments (nvarchar(MAX))
+            $reference = Str::limit($memoData['reference'], 30, '');
+
             // Memos: amount should be positive in parameter, sign determined by ledger type
             // Debit Memo (type 3): positive amount (increases AR)
             // Credit Memo (type 5): negative amount (decreases AR)
@@ -284,7 +293,7 @@ class PracticeCsPaymentWriter
                 $ledgerTypeKey,
                 $memoData['client_KEY'],
                 $entryDate,
-                $memoData['reference'],
+                $reference,
                 $amount,
                 $memoData['comments'],
                 $memoData['internal_comments'],

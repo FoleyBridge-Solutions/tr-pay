@@ -279,16 +279,39 @@ class PaymentService
             // Use Money class to convert dollars to cents safely
             $amountInCents = Money::toCents($amount);
 
+            // Select application ID based on personal vs business account
+            $isBusiness = $achDetails['is_business'] ?? false;
+            $applicationId = $isBusiness
+                ? config('kotapay.application_id.business')
+                : config('kotapay.application_id.personal');
+
             // Use the AchBillable trait method on the customer
             $response = $customer->chargeAch([
                 'routing_number' => $achDetails['routing_number'],
                 'account_number' => $achDetails['account_number'],
                 'account_type' => $achDetails['account_type'] ?? 'Checking',
                 'account_name' => ! empty($achDetails['account_name']) ? $achDetails['account_name'] : $customer->name,
+                'application_id' => $applicationId,
             ], $amountInCents, [
                 'description' => $options['description'] ?? 'ACH Payment',
                 'effective_date' => $options['effective_date'] ?? now()->format('Y-m-d'),
             ]);
+
+            // Defense-in-depth: validate Kotapay response status
+            $responseStatus = $response['status'] ?? null;
+            if ($responseStatus === 'fail' || $responseStatus === 'error') {
+                $errors = $response['data'] ?? $response['message'] ?? 'Unknown error';
+                throw new PaymentFailedException(
+                    'Kotapay rejected ACH payment: '.json_encode($errors)
+                );
+            }
+
+            if (empty($response['data']['transactionId'] ?? null)) {
+                Log::warning('Kotapay returned no transactionId', [
+                    'customer_id' => $customer->id,
+                    'response_status' => $responseStatus,
+                ]);
+            }
 
             Log::info('Kotapay ACH charge successful', [
                 'customer_id' => $customer->id,
@@ -641,18 +664,34 @@ class PaymentService
         // Use Money class to convert dollars to cents safely
         $amountInCents = Money::toCents($amount);
 
+        // Select application ID based on personal vs business account
+        $isBusiness = $paymentData['is_business'] ?? false;
+        $applicationId = $isBusiness
+            ? config('kotapay.application_id.business')
+            : config('kotapay.application_id.personal');
+
         // Use the AchBillable trait on the customer to charge via Kotapay
         $response = $customer->chargeAch([
             'routing_number' => $paymentData['routing'],
             'account_number' => $paymentData['account'],
             'account_type' => $accountType,
             'account_name' => ! empty($paymentData['name']) ? $paymentData['name'] : $customer->name,
+            'application_id' => $applicationId,
         ], $amountInCents, [
             'description' => $description,
             'effective_date' => now()->format('Y-m-d'),
         ]);
 
-        $transactionId = $response['transaction_id'] ?? 'ach_'.bin2hex(random_bytes(16));
+        // Defense-in-depth: validate Kotapay response status
+        $responseStatus = $response['status'] ?? null;
+        if ($responseStatus === 'fail' || $responseStatus === 'error') {
+            $errors = $response['data'] ?? $response['message'] ?? 'Unknown error';
+            throw new \Exception('Kotapay rejected recurring ACH payment: '.json_encode($errors));
+        }
+
+        $transactionId = $response['data']['transactionId']
+            ?? $response['transaction_id']
+            ?? 'ach_'.bin2hex(random_bytes(16));
 
         Log::info('Recurring ACH charge processed via Kotapay', [
             'transaction_id' => $transactionId,

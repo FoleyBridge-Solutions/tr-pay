@@ -52,6 +52,13 @@ return [
     // Company ID for API requests (provided by Kotapay)
     'company_id' => env('KOTAPAY_API_COMPANY_ID'),
 
+    // Application IDs for ACH payments (from /v1/Companies/{CompanyId}/applications)
+    // Personal (PPD) and Business (CCD) accounts require different application IDs
+    'application_id' => [
+        'personal' => env('KOTAPAY_APPLICATION_ID_PERSONAL', '463591717'),  // PPD-Debit
+        'business' => env('KOTAPAY_APPLICATION_ID_BUSINESS', '463591718'),  // CCD-Debit
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Token Cache

@@ -244,6 +244,7 @@ class ProcessRecurringPayments extends Command
             'account' => $bankDetails['account_number'],
             'account_type' => $savedMethod->account_type ?? 'checking',
             'name' => $customer->name,
+            'is_business' => $savedMethod->is_business ?? false,
         ];
 
         return $paymentService->processRecurringCharge(
