@@ -27,7 +27,7 @@ class PaymentMethods extends Component
 
     // Client data
     #[Url(as: 'client')]
-    public ?int $clientKey = null;
+    public ?string $clientId = null;
 
     public ?array $clientInfo = null;
 
@@ -88,7 +88,7 @@ class PaymentMethods extends Component
 
     public function mount(): void
     {
-        if ($this->clientKey) {
+        if ($this->clientId) {
             $this->loadClient();
         }
     }
@@ -98,7 +98,7 @@ class PaymentMethods extends Component
      */
     protected function loadClient(): void
     {
-        if (! $this->clientKey) {
+        if (! $this->clientId) {
             return;
         }
 
@@ -113,8 +113,8 @@ class PaymentMethods extends Component
                     individual_last_name,
                     federal_tin
                 FROM Client
-                WHERE client_KEY = ?
-            ', [$this->clientKey]);
+                WHERE client_id = ?
+            ', [$this->clientId]);
 
             if (! $client) {
                 $this->errorMessage = 'Client not found.';
@@ -126,10 +126,9 @@ class PaymentMethods extends Component
 
             // Find or create local Customer record
             $this->customer = Customer::firstOrCreate(
-                ['client_key' => $this->clientKey],
+                ['client_id' => $this->clientId],
                 [
                     'name' => $client->client_name,
-                    'client_id' => $client->client_id,
                 ]
             );
 

@@ -35,7 +35,7 @@
     @endif
 
     {{-- No Client Selected --}}
-    @if(!$clientKey)
+    @if(!$clientId)
         <flux:card class="max-w-lg mx-auto">
             <div class="p-8 text-center">
                 <flux:icon name="user" class="w-12 h-12 mx-auto text-zinc-400 mb-4" />

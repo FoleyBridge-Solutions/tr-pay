@@ -56,7 +56,7 @@
                 </flux:table.columns>
                 <flux:table.rows>
                     @foreach($searchResults as $client)
-                        <flux:table.row wire:key="client-{{ $client['client_KEY'] }}">
+                        <flux:table.row wire:key="client-{{ $client['client_id'] }}">
                             <flux:table.cell class="font-mono">{{ $client['client_id'] }}</flux:table.cell>
                             <flux:table.cell>
                                 <span class="font-medium">{{ $client['client_name'] }}</span>

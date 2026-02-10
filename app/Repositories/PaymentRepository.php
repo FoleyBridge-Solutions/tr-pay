@@ -22,6 +22,25 @@ class PaymentRepository
     private const CUSTOM_FIELD_GROUP_NAME = 122;
 
     /**
+     * Resolve a PracticeCS client_KEY from a client_id.
+     *
+     * Used internally when callers provide the human-readable client_id
+     * but the PracticeCS query requires the surrogate client_KEY for joins.
+     *
+     * @param  string  $clientId  The human-readable client identifier
+     * @return int|null The PracticeCS client_KEY, or null if not found
+     */
+    public function resolveClientKey(string $clientId): ?int
+    {
+        $result = DB::connection('sqlsrv')->selectOne(
+            'SELECT client_KEY FROM Client WHERE client_id = ?',
+            [$clientId]
+        );
+
+        return $result ? (int) $result->client_KEY : null;
+    }
+
+    /**
      * Table information KEY for the Client table in PracticeCS.
      * Used with Custom_Value queries to link custom fields to clients.
      */
@@ -171,10 +190,23 @@ class PaymentRepository
     }
 
     /**
-     * Get all open invoices for a client
+     * Get all open invoices for a client.
+     *
+     * @param  int|null  $clientKey  The PracticeCS client_KEY (internal surrogate key)
+     * @param  string|null  $clientId  The human-readable client_id (used if $clientKey is null)
      */
-    public function getClientOpenInvoices(int $clientKey): array
+    public function getClientOpenInvoices(?int $clientKey = null, ?string $clientId = null): array
     {
+        if ($clientKey === null && $clientId !== null) {
+            $clientKey = $this->resolveClientKey($clientId);
+            if ($clientKey === null) {
+                return [];
+            }
+        }
+
+        if ($clientKey === null) {
+            return [];
+        }
         $sql = "
             -- Calculate the sum of applied amounts for each ledger entry
             WITH AppliedTo AS (
@@ -262,16 +294,27 @@ class PaymentRepository
     }
 
     /**
-     * Get open invoices for a client and their related group members
+     * Get open invoices for a client and their related group members.
      *
      * Optimized to batch queries and avoid N+1 query issues.
      *
-     * @param  int  $clientKey  The primary client key
+     * @param  int|null  $clientKey  The PracticeCS client_KEY (internal surrogate key)
      * @param  array  $clientInfo  The client info array (containing client_name, etc.)
+     * @param  string|null  $clientId  The human-readable client_id (used if $clientKey is null)
      * @return array ['openInvoices' => [], 'totalBalance' => float]
      */
-    public function getGroupedInvoicesForClient(int $clientKey, array $clientInfo): array
+    public function getGroupedInvoicesForClient(?int $clientKey, array $clientInfo, ?string $clientId = null): array
     {
+        if ($clientKey === null && $clientId !== null) {
+            $clientKey = $this->resolveClientKey($clientId);
+            if ($clientKey === null) {
+                return ['openInvoices' => [], 'totalBalance' => 0];
+            }
+        }
+
+        if ($clientKey === null) {
+            return ['openInvoices' => [], 'totalBalance' => 0];
+        }
         $openInvoices = [];
         $totalBalance = 0;
 
@@ -607,11 +650,22 @@ class PaymentRepository
      *   ...
      * ]
      *
-     * @param  int  $clientKey  The client's database key
+     * @param  int|null  $clientKey  The PracticeCS client_KEY (internal surrogate key)
+     * @param  string|null  $clientId  The human-readable client_id (used if $clientKey is null)
      * @return array Engagement-grouped pending projects
      */
-    public function getPendingProjectsForClientGroup(int $clientKey): array
+    public function getPendingProjectsForClientGroup(?int $clientKey = null, ?string $clientId = null): array
     {
+        if ($clientKey === null && $clientId !== null) {
+            $clientKey = $this->resolveClientKey($clientId);
+            if ($clientKey === null) {
+                return [];
+            }
+        }
+
+        if ($clientKey === null) {
+            return [];
+        }
         // 1. Find client group
         // Use 'sqlsrv' connection for PracticeCS SQL Server database
         $clientGroup = DB::connection('sqlsrv')->selectOne('

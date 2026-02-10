@@ -113,7 +113,7 @@ class Create extends Component
     /**
      * Select a client and load their invoices.
      */
-    public function selectClient(int $clientKey): void
+    public function selectClient(string $clientId): void
     {
         $this->errorMessage = null;
 
@@ -128,8 +128,8 @@ class Create extends Component
                     individual_last_name,
                     federal_tin
                 FROM Client
-                WHERE client_KEY = ?
-            ', [$clientKey]);
+                WHERE client_id = ?
+            ', [$clientId]);
 
             if (! $client) {
                 $this->errorMessage = 'Client not found.';
@@ -140,7 +140,7 @@ class Create extends Component
             $this->selectedClient = (array) $client;
 
             // Get client balance
-            $balance = $this->paymentRepo->getClientBalance($clientKey);
+            $balance = $this->paymentRepo->getClientBalance(null, $clientId);
             $this->selectedClient['balance'] = $balance['balance'];
 
             // Load invoices

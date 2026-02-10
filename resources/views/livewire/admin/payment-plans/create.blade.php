@@ -77,12 +77,12 @@
                             </flux:table.columns>
                             <flux:table.rows>
                                 @foreach($searchResults as $client)
-                                    <flux:table.row wire:key="client-{{ $client['client_KEY'] }}">
+                                    <flux:table.row wire:key="client-{{ $client['client_id'] }}">
                                         <flux:table.cell class="font-mono">{{ $client['client_id'] }}</flux:table.cell>
                                         <flux:table.cell>{{ $client['client_name'] }}</flux:table.cell>
                                         <flux:table.cell class="text-zinc-500">****{{ substr($client['federal_tin'] ?? '', -4) }}</flux:table.cell>
                                         <flux:table.cell>
-                                            <flux:button wire:click="selectClient({{ $client['client_KEY'] }})" size="sm" variant="primary">
+                                            <flux:button wire:click="selectClient('{{ $client['client_id'] }}')" size="sm" variant="primary">
                                                 Select
                                             </flux:button>
                                         </flux:table.cell>

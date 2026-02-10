@@ -42,7 +42,9 @@ trait HasInvoiceManagement
         }
 
         try {
-            $invoices = $this->paymentRepo->getClientOpenInvoices($this->selectedClient['client_KEY']);
+            $invoices = $this->paymentRepo->getClientOpenInvoices(
+                $this->selectedClient['client_KEY'],
+            );
             $this->availableInvoices = $invoices;
         } catch (\Exception $e) {
             Log::error('Failed to load invoices', ['error' => $e->getMessage()]);

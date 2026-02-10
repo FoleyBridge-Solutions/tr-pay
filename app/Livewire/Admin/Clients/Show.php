@@ -119,7 +119,7 @@ class Show extends Component
             // Load recurring payments (from local DB, using client_id)
             $this->loadRecurringPayments();
 
-            // Load payment plans (from local DB, using client_KEY)
+            // Load payment plans (from local DB, using client_id)
             $this->loadPaymentPlans();
 
         } catch (\Exception $e) {

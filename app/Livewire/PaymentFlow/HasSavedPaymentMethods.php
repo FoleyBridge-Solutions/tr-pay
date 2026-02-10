@@ -33,7 +33,7 @@ trait HasSavedPaymentMethods
      */
     public function loadSavedPaymentMethods(): void
     {
-        if (! $this->clientInfo || ! isset($this->clientInfo['client_KEY'])) {
+        if (! $this->clientInfo || ! isset($this->clientInfo['client_id'])) {
             $this->savedPaymentMethods = collect();
             $this->hasSavedMethods = false;
 
@@ -46,7 +46,7 @@ trait HasSavedPaymentMethods
             $this->hasSavedMethods = $this->savedPaymentMethods->isNotEmpty();
         } catch (\Exception $e) {
             Log::error('Failed to load saved payment methods', [
-                'client_key' => $this->clientInfo['client_KEY'],
+                'client_id' => $this->clientInfo['client_id'],
                 'error' => $e->getMessage(),
             ]);
             $this->savedPaymentMethods = collect();

@@ -69,7 +69,7 @@ class ProcessScheduledSinglePayment implements ShouldQueue
 
         $metadata = $this->payment->metadata ?? [];
         $paymentMethodToken = $metadata['payment_method_token'] ?? null;
-        $clientKey = $this->payment->client_key;
+        $clientId = $this->payment->client_key; // Column stores client_id values
 
         if (! $paymentMethodToken) {
             $this->handleFailure('No payment method token found');
@@ -78,7 +78,7 @@ class ProcessScheduledSinglePayment implements ShouldQueue
         }
 
         // Get the customer
-        $customer = Customer::where('client_key', $clientKey)->first();
+        $customer = Customer::where('client_id', $clientId)->first();
         if (! $customer) {
             $this->handleFailure('Customer not found');
 
@@ -217,8 +217,22 @@ class ProcessScheduledSinglePayment implements ShouldQueue
         $methodType = $this->payment->payment_method === 'credit_card' ? 'credit_card' : 'ach';
         $invoices = $metadata['invoices'] ?? [];
 
+        // Resolve client_KEY from client_id for PracticeCS posting
+        $clientId = $this->payment->client_key; // Column stores client_id values
+        $paymentRepo = app(\App\Repositories\PaymentRepository::class);
+        $clientKey = $paymentRepo->resolveClientKey($clientId);
+
+        if (! $clientKey) {
+            Log::error('Failed to resolve client_KEY for PracticeCS write', [
+                'payment_id' => $this->payment->id,
+                'client_id' => $clientId,
+            ]);
+
+            return;
+        }
+
         $practiceCsData = [
-            'client_KEY' => $this->payment->client_key,
+            'client_KEY' => $clientKey,
             'amount' => $this->payment->amount,
             'reference' => $this->payment->transaction_id,
             'comments' => "Scheduled payment - {$methodType}",

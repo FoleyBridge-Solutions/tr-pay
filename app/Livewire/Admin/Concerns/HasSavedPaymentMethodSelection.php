@@ -16,7 +16,7 @@ use App\Models\CustomerPaymentMethod;
  * Required component properties:
  * - ?int $savedPaymentMethodId
  * - Collection $savedPaymentMethods
- * - ?array $selectedClient (must contain 'client_KEY')
+ * - ?array $selectedClient (must contain 'client_id')
  * - string $paymentMethodType ('none', 'saved', 'card', or 'ach')
  * - string $cardNumber
  * - string $accountNumber
@@ -51,7 +51,7 @@ trait HasSavedPaymentMethodSelection
             return;
         }
 
-        $customer = Customer::where('client_key', $this->selectedClient['client_KEY'])->first();
+        $customer = Customer::where('client_id', $this->selectedClient['client_id'])->first();
 
         if ($customer) {
             $this->savedPaymentMethods = $customer->customerPaymentMethods;

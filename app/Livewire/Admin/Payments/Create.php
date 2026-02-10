@@ -50,7 +50,7 @@ class Create extends Component
 
     // Step 1: Client Search
     #[Url]
-    public ?int $client = null;
+    public ?string $client = null;
 
     public string $searchType = 'name'; // 'name', 'client_id', or 'tax_id'
 
@@ -235,7 +235,7 @@ class Create extends Component
     /**
      * Select a client and load their invoices.
      */
-    public function selectClient(int $clientKey): void
+    public function selectClient(string $clientId): void
     {
         $this->errorMessage = null;
 
@@ -249,8 +249,8 @@ class Create extends Component
                     individual_last_name,
                     federal_tin
                 FROM Client
-                WHERE client_KEY = ?
-            ', [$clientKey]);
+                WHERE client_id = ?
+            ', [$clientId]);
 
             if (! $client) {
                 $this->errorMessage = 'Client not found.';
@@ -261,7 +261,7 @@ class Create extends Component
             $this->selectedClient = (array) $client;
 
             // Get client balance
-            $balance = $this->paymentRepo->getClientBalance($clientKey);
+            $balance = $this->paymentRepo->getClientBalance(null, $this->selectedClient['client_id']);
             $this->selectedClient['balance'] = $balance['balance'];
 
             // Load invoices
@@ -294,7 +294,7 @@ class Create extends Component
 
         try {
             $this->pendingEngagements = $this->paymentRepo->getPendingProjectsForClientGroup(
-                $this->selectedClient['client_KEY']
+                $this->selectedClient['client_KEY'],
             );
         } catch (\Exception $e) {
             Log::error('Failed to load pending engagements', ['error' => $e->getMessage()]);
@@ -592,7 +592,7 @@ class Create extends Component
 
         // Look up or create the customer record
         $paymentService = app(\App\Services\PaymentService::class);
-        $customer = Customer::where('client_key', $this->selectedClient['client_KEY'])->first();
+        $customer = Customer::where('client_id', $this->selectedClient['client_id'])->first();
         if (! $customer) {
             $customer = $paymentService->getOrCreateCustomer([
                 'client_KEY' => $this->selectedClient['client_KEY'],
@@ -626,7 +626,7 @@ class Create extends Component
         $payment = Payment::create([
             'transaction_id' => $this->transactionId,
             'customer_id' => $customer->id,
-            'client_key' => $this->selectedClient['client_KEY'],
+            'client_key' => $this->selectedClient['client_id'],
             'amount' => $baseAmount,
             'fee' => $fee,
             'total_amount' => Money::addDollars($baseAmount, $fee),
@@ -741,7 +741,7 @@ class Create extends Component
             throw new \Exception('No saved payment method selected.');
         }
 
-        $customer = Customer::where('client_key', $this->selectedClient['client_KEY'])->first();
+        $customer = Customer::where('client_id', $this->selectedClient['client_id'])->first();
         if (! $customer) {
             throw new \Exception('Customer not found.');
         }
@@ -776,10 +776,11 @@ class Create extends Component
         $paymentService = app(PaymentService::class);
 
         // Ensure a local customer record exists for this PracticeCS client
-        $customer = Customer::where('client_key', $this->selectedClient['client_KEY'])->first();
+        $customer = Customer::where('client_id', $this->selectedClient['client_id'])->first();
         if (! $customer) {
             $customer = $paymentService->getOrCreateCustomer([
                 'client_KEY' => $this->selectedClient['client_KEY'],
+                'client_id' => $this->selectedClient['client_id'],
                 'client_name' => $this->selectedClient['name'] ?? $this->selectedClient['client_name'] ?? 'Client',
             ]);
         }
@@ -891,7 +892,7 @@ class Create extends Component
         $payment = Payment::create([
             'customer_id' => $customer->id,
             'transaction_id' => $this->transactionId,
-            'client_key' => $this->selectedClient['client_KEY'],
+            'client_key' => $this->selectedClient['client_id'],
             'amount' => $baseAmount,
             'fee' => $fee,
             'total_amount' => Money::addDollars($baseAmount, $fee),

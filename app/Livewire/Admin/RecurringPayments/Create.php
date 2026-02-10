@@ -105,10 +105,10 @@ class Create extends Component
     /**
      * Select a client.
      */
-    public function selectClient(int $clientKey): void
+    public function selectClient(string $clientId): void
     {
         foreach ($this->searchResults as $client) {
-            if ($client['client_KEY'] == $clientKey) {
+            if ($client['client_id'] == $clientId) {
                 $this->selectedClient = $client;
                 $this->searchResults = [];
                 $this->searchQuery = '';
@@ -225,11 +225,11 @@ class Create extends Component
             }
 
             // Get or create customer
-            $customer = Customer::where('client_key', $this->selectedClient['client_KEY'])->first();
+            $customer = Customer::where('client_id', $this->selectedClient['client_id'])->first();
             if (! $customer) {
                 $customer = Customer::create([
                     'name' => $this->selectedClient['client_name'],
-                    'client_key' => $this->selectedClient['client_KEY'],
+                    'client_id' => $this->selectedClient['client_id'],
                 ]);
             }
 

@@ -112,7 +112,7 @@
                                     @foreach($searchResults as $client)
                                         <button
                                             type="button"
-                                            wire:click="selectClient({{ $client['client_KEY'] }})"
+                                            wire:click="selectClient('{{ $client['client_id'] }}')"
                                             class="w-full px-4 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700 last:border-b-0"
                                         >
                                             <span class="font-medium">{{ $client['client_name'] }}</span>

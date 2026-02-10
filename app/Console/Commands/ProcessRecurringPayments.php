@@ -277,7 +277,7 @@ class ProcessRecurringPayments extends Command
         $customer = $recurringPayment->customer;
         if (! $customer) {
             $customer = $paymentService->getOrCreateCustomer([
-                'client_KEY' => $recurringPayment->client_id,
+                'client_id' => $recurringPayment->client_id,
                 'client_name' => $recurringPayment->client_name,
             ]);
 

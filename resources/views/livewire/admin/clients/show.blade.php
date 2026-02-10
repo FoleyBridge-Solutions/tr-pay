@@ -114,9 +114,9 @@
                 <flux:card>
                     <div class="p-4 border-b border-zinc-200 dark:border-zinc-700 flex items-center justify-between">
                         <flux:heading size="md">Saved Payment Methods ({{ $paymentMethods->count() }})</flux:heading>
-                        @if(!$notFound && $client && $client['client_KEY'])
+                        @if(!$notFound && $client && $client['client_id'])
                             <flux:button
-                                href="{{ route('admin.clients.payment-methods', ['client' => $client['client_KEY']]) }}"
+                                href="{{ route('admin.clients.payment-methods', ['client' => $client['client_id']]) }}"
                                 size="sm"
                                 variant="ghost"
                                 icon="plus"
@@ -163,10 +163,10 @@
                     @else
                         <div class="p-4 text-center text-zinc-500">
                             <flux:text>No saved payment methods</flux:text>
-                            @if(!$notFound && $client && $client['client_KEY'])
+                            @if(!$notFound && $client && $client['client_id'])
                                 <div class="mt-2">
                                     <flux:button
-                                        href="{{ route('admin.clients.payment-methods', ['client' => $client['client_KEY']]) }}"
+                                        href="{{ route('admin.clients.payment-methods', ['client' => $client['client_id']]) }}"
                                         size="sm"
                                         variant="primary"
                                         icon="plus"
@@ -183,7 +183,7 @@
                 @if(!$notFound)
                 <div class="space-y-2">
                     <flux:button
-                        href="{{ route('admin.payments.create') }}?client={{ $client['client_KEY'] }}"
+                        href="{{ route('admin.payments.create') }}?client={{ $client['client_id'] }}"
                         variant="primary"
                         class="w-full"
                         icon="banknotes"
@@ -191,7 +191,7 @@
                         Create Single Payment
                     </flux:button>
                     <flux:button
-                        href="{{ route('admin.payment-plans.create') }}?client={{ $client['client_KEY'] }}"
+                        href="{{ route('admin.payment-plans.create') }}?client={{ $client['client_id'] }}"
                         variant="ghost"
                         class="w-full"
                         icon="calendar-days"
@@ -199,7 +199,7 @@
                         Create Payment Plan
                     </flux:button>
                     <flux:button
-                        href="{{ route('admin.recurring-payments.create') }}?client={{ $client['client_KEY'] }}"
+                        href="{{ route('admin.recurring-payments.create') }}?client={{ $client['client_id'] }}"
                         variant="ghost"
                         class="w-full"
                         icon="arrow-path"

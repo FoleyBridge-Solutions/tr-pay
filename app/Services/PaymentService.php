@@ -101,21 +101,22 @@ class PaymentService
      */
     public function getOrCreateCustomer(array $clientInfo): Customer
     {
-        // Try to find existing customer by client_key from SQL Server
-        $customer = Customer::where('client_key', $clientInfo['client_KEY'])->first();
+        // Try to find existing customer by client_id (the human-readable identifier)
+        $clientId = $clientInfo['client_id'] ?? null;
+        $customer = $clientId ? Customer::where('client_id', $clientId)->first() : null;
 
         if (! $customer) {
             // Create new customer in SQLite database
             $customer = Customer::create([
                 'name' => $clientInfo['client_name'] ?? $clientInfo['description'] ?? 'Unknown',
                 'email' => $clientInfo['email'] ?? null,
-                'client_id' => $clientInfo['client_id'] ?? null,
-                'client_key' => $clientInfo['client_KEY'],
+                'client_id' => $clientId,
+                'client_key' => $clientInfo['client_KEY'] ?? null,
             ]);
 
             Log::info('Created new customer', [
                 'customer_id' => $customer->id,
-                'client_key' => $clientInfo['client_KEY'],
+                'client_id' => $clientId,
             ]);
         }
 
@@ -747,7 +748,7 @@ class PaymentService
             // Create the payment plan record
             $paymentPlan = PaymentPlan::create([
                 'customer_id' => $customer->id,
-                'client_key' => $clientInfo['client_KEY'],
+                'client_key' => $clientInfo['client_id'],
                 'plan_id' => $planId,
                 'invoice_amount' => $invoiceAmount,
                 'plan_fee' => $planFee,
@@ -780,7 +781,7 @@ class PaymentService
 
             Payment::create([
                 'customer_id' => $customer->id,
-                'client_key' => $clientInfo['client_KEY'],
+                'client_key' => $clientInfo['client_id'],
                 'payment_plan_id' => $paymentPlan->id,
                 'transaction_id' => $downPaymentResult['transaction_id'],
                 'amount' => $downPayment,
@@ -804,7 +805,7 @@ class PaymentService
             Log::info('Payment plan created successfully with down payment', [
                 'plan_id' => $planId,
                 'customer_id' => $customer->id,
-                'client_key' => $clientInfo['client_KEY'],
+                'client_id' => $clientInfo['client_id'],
                 'total_amount' => $totalAmount,
                 'down_payment' => $downPayment,
                 'remaining_balance' => $remainingBalance,
@@ -924,7 +925,7 @@ class PaymentService
 
         return Payment::create([
             'customer_id' => $customer->id,
-            'client_key' => $clientInfo['client_KEY'],
+            'client_key' => $clientInfo['client_id'],
             'transaction_id' => $transactionId,
             'amount' => $amount,
             'fee' => $fee,
