@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "0abbba7bd323953de7429c363b50fd92",
+    "content-hash": "f17aaf103ff03f88f4a449d044c5af1e",
     "packages": [
         {
             "name": "brick/math",
@@ -814,13 +814,13 @@
             "version": "dev-main",
             "source": {
                 "type": "git",
-                "url": "https://github.com/o-psi/mipaymentchoice-cashier.git",
-                "reference": "568c497e3fdabef80d75a3241c7cc081e96a3129"
+                "url": "https://github.com/FoleyBridge-Solutions/mipaymentchoice-cashier.git",
+                "reference": "169008c12645bbce97d3ea9d65b058f8f2291249"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/o-psi/mipaymentchoice-cashier/zipball/568c497e3fdabef80d75a3241c7cc081e96a3129",
-                "reference": "568c497e3fdabef80d75a3241c7cc081e96a3129",
+                "url": "https://api.github.com/repos/FoleyBridge-Solutions/mipaymentchoice-cashier/zipball/169008c12645bbce97d3ea9d65b058f8f2291249",
+                "reference": "169008c12645bbce97d3ea9d65b058f8f2291249",
                 "shasum": ""
             },
             "require": {
@@ -872,10 +872,10 @@
                 "payment"
             ],
             "support": {
-                "source": "https://github.com/o-psi/mipaymentchoice-cashier/tree/main",
-                "issues": "https://github.com/o-psi/mipaymentchoice-cashier/issues"
+                "source": "https://github.com/FoleyBridge-Solutions/mipaymentchoice-cashier/tree/main",
+                "issues": "https://github.com/FoleyBridge-Solutions/mipaymentchoice-cashier/issues"
             },
-            "time": "2026-02-02T20:21:15+00:00"
+            "time": "2026-02-06T17:37:00+00:00"
         },
         {
             "name": "fruitcake/php-cors",

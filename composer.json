@@ -99,7 +99,7 @@
         },
         "foleybridgesolutions/mipaymentchoice-cashier": {
             "type": "vcs",
-            "url": "https://github.com/o-psi/mipaymentchoice-cashier"
+            "url": "https://github.com/FoleyBridge-Solutions/mipaymentchoice-cashier"
         },
         "foleybridgesolutions/kotapay-cashier": {
             "type": "vcs",
