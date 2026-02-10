@@ -54,7 +54,7 @@ class ProcessRecurringPayments extends Command
         $query = RecurringPayment::query()
             ->where('status', RecurringPayment::STATUS_ACTIVE)
             ->whereNotNull('next_payment_date')
-            ->where('next_payment_date', '<=', now()->toDateString());
+            ->whereDate('next_payment_date', '<=', now()->toDateString());
 
         if ($specificId) {
             $query->where('id', $specificId);

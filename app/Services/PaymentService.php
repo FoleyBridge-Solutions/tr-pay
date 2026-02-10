@@ -306,22 +306,28 @@ class PaymentService
                 );
             }
 
-            if (empty($response['data']['transactionId'] ?? null)) {
+            $transactionId = $response['data']['TransactionId']
+                ?? $response['data']['transactionId']
+                ?? $response['transaction_id']
+                ?? null;
+
+            if (empty($transactionId)) {
                 Log::warning('Kotapay returned no transactionId', [
                     'customer_id' => $customer->id,
                     'response_status' => $responseStatus,
                 ]);
+                $transactionId = 'ach_'.bin2hex(random_bytes(16));
             }
 
             Log::info('Kotapay ACH charge successful', [
                 'customer_id' => $customer->id,
                 'amount' => $amount,
-                'transaction_id' => $response['transaction_id'] ?? null,
+                'transaction_id' => $transactionId,
             ]);
 
             return [
                 'success' => true,
-                'transaction_id' => $response['transaction_id'] ?? 'ach_'.bin2hex(random_bytes(16)),
+                'transaction_id' => $transactionId,
                 'amount' => $amount,
                 'status' => self::STATUS_PENDING, // ACH payments are pending until settled
                 'response' => $response,
@@ -689,7 +695,8 @@ class PaymentService
             throw new \Exception('Kotapay rejected recurring ACH payment: '.json_encode($errors));
         }
 
-        $transactionId = $response['data']['transactionId']
+        $transactionId = $response['data']['TransactionId']
+            ?? $response['data']['transactionId']
             ?? $response['transaction_id']
             ?? 'ach_'.bin2hex(random_bytes(16));
 
