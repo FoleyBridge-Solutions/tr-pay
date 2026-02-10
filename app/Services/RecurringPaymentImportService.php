@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Customer;
+use App\Models\CustomerPaymentMethod;
 use App\Models\RecurringPayment;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -61,6 +62,8 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
  */
 class RecurringPaymentImportService
 {
+    protected CustomerPaymentMethodService $paymentMethodService;
+
     protected array $errors = [];
 
     protected array $imported = [];
@@ -70,6 +73,11 @@ class RecurringPaymentImportService
     protected string $batchId;
 
     protected string $delimiter = ',';
+
+    public function __construct(CustomerPaymentMethodService $paymentMethodService)
+    {
+        $this->paymentMethodService = $paymentMethodService;
+    }
 
     /**
      * Column name aliases to support alternative spreadsheet formats.
@@ -371,6 +379,10 @@ class RecurringPaymentImportService
 
     /**
      * Process a single row from the CSV.
+     *
+     * Creates a RecurringPayment record and, if payment details are provided,
+     * creates a CustomerPaymentMethod (saved method) so the recurring payment
+     * references a reusable gateway token rather than raw encrypted card/ACH data.
      */
     protected function processRow(array $row, int $rowNum): void
     {
@@ -403,16 +415,39 @@ class RecurringPaymentImportService
             $lastFour = null;
             $status = RecurringPayment::STATUS_PENDING;
 
-            if ($hasPaymentInfo) {
-                $paymentType = strtolower(trim($row['payment_type'] ?? ''));
-                $token = $this->tokenizePaymentMethod($row, $paymentType);
-                $lastFour = $this->getLastFour($row, $paymentType);
-                $status = RecurringPayment::STATUS_ACTIVE;
-            }
-
             // Parse amount and check for $0 amounts (needs review)
             $amount = $this->parseAmount($row['amount']);
             $needsAmountReview = $amount == 0;
+
+            // Parse client name (handles "Company | Contact" format)
+            $parsedName = $this->parseClientName($row['client_name']);
+
+            // Get or create customer
+            $customer = $this->getOrCreateCustomer($row, $parsedName['client_name']);
+
+            if ($hasPaymentInfo) {
+                $paymentType = strtolower(trim($row['payment_type'] ?? ''));
+                $lastFour = $this->getLastFour($row, $paymentType);
+
+                // Create or find a saved payment method (CustomerPaymentMethod)
+                // so recurring payments reference a reusable token, not raw card data
+                $savedMethod = $this->getOrCreateSavedPaymentMethod($customer, $row, $paymentType, $lastFour, $rowNum);
+
+                if ($savedMethod) {
+                    $token = $savedMethod->mpc_token;
+                    $status = RecurringPayment::STATUS_ACTIVE;
+                } else {
+                    // Tokenization failed — fall back to encrypted raw data
+                    // so the record is still created and can be fixed later
+                    $token = $this->tokenizePaymentMethod($row, $paymentType);
+                    $status = RecurringPayment::STATUS_ACTIVE;
+
+                    $this->warnings[] = [
+                        'row' => $rowNum,
+                        'message' => "Could not create saved payment method for '{$parsedName['client_name']}' - payment info stored encrypted (legacy format)",
+                    ];
+                }
+            }
 
             // If amount is $0, mark as pending regardless of payment info
             if ($needsAmountReview) {
@@ -426,12 +461,6 @@ class RecurringPaymentImportService
                 $nextPaymentDate = $this->calculateNextOccurrence($startDate, $row['frequency']);
             }
 
-            // Parse client name (handles "Company | Contact" format)
-            $parsedName = $this->parseClientName($row['client_name']);
-
-            // Get or create customer
-            $customer = $this->getOrCreateCustomer($row, $parsedName['client_name']);
-
             // Build metadata
             $metadata = [
                 'imported_at' => now()->toIso8601String(),
@@ -441,6 +470,11 @@ class RecurringPaymentImportService
             // Add contact name to metadata if parsed from "Company | Contact" format
             if (! empty($parsedName['contact_name'])) {
                 $metadata['contact_name'] = $parsedName['contact_name'];
+            }
+
+            // Track saved method linkage in metadata
+            if (isset($savedMethod) && $savedMethod) {
+                $metadata['saved_method_id'] = $savedMethod->id;
             }
 
             // Flag if $0 amount needs review
@@ -480,6 +514,137 @@ class RecurringPaymentImportService
                 'message' => 'Failed to create recurring payment: '.$e->getMessage(),
             ];
         }
+    }
+
+    /**
+     * Get or create a CustomerPaymentMethod for the imported payment data.
+     *
+     * First checks if the customer already has a saved method with the same
+     * type and last four digits. If found, reuses it to avoid duplicates.
+     * Otherwise, creates a new saved method via the gateway (cards) or
+     * with a local pseudo-token (ACH).
+     *
+     * @param  Customer|null  $customer  The customer record
+     * @param  array  $row  The CSV row data with payment details
+     * @param  string  $paymentType  'card' or 'ach'
+     * @param  string  $lastFour  Last 4 digits of card/account
+     * @param  int  $rowNum  Row number for logging
+     * @return CustomerPaymentMethod|null The saved method, or null if creation failed
+     */
+    protected function getOrCreateSavedPaymentMethod(
+        ?Customer $customer,
+        array $row,
+        string $paymentType,
+        string $lastFour,
+        int $rowNum
+    ): ?CustomerPaymentMethod {
+        if (! $customer) {
+            return null;
+        }
+
+        // Check for existing saved method with same type + last_four for this customer
+        $existing = $customer->customerPaymentMethods()
+            ->where('type', $paymentType === 'card' ? CustomerPaymentMethod::TYPE_CARD : CustomerPaymentMethod::TYPE_ACH)
+            ->where('last_four', $lastFour)
+            ->first();
+
+        if ($existing) {
+            Log::info('Reusing existing saved payment method for import', [
+                'customer_id' => $customer->id,
+                'payment_method_id' => $existing->id,
+                'type' => $paymentType,
+                'last_four' => $lastFour,
+                'row' => $rowNum,
+            ]);
+
+            return $existing;
+        }
+
+        // Create new saved payment method
+        try {
+            if ($paymentType === 'card') {
+                return $this->createSavedCardMethod($customer, $row);
+            }
+
+            return $this->createSavedAchMethod($customer, $row);
+        } catch (\Exception $e) {
+            Log::warning('Failed to create saved payment method during import', [
+                'customer_id' => $customer->id,
+                'type' => $paymentType,
+                'last_four' => $lastFour,
+                'row' => $rowNum,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Create a saved card payment method via MiPaymentChoice tokenization.
+     *
+     * @param  Customer  $customer  The customer
+     * @param  array  $row  CSV row with card_number, card_expiry, card_cvv, card_name
+     * @return CustomerPaymentMethod The created saved method with MPC token
+     */
+    protected function createSavedCardMethod(Customer $customer, array $row): CustomerPaymentMethod
+    {
+        $cardNumber = preg_replace('/\D/', '', $row['card_number']);
+
+        // Parse expiry from various formats (MM/YY, MMYY, MM/YYYY)
+        $expiry = trim($row['card_expiry']);
+        $expMonth = null;
+        $expYear = null;
+
+        if (preg_match('/^(\d{1,2})\/?(\d{2,4})$/', $expiry, $matches)) {
+            $expMonth = (int) $matches[1];
+            $expYear = (int) $matches[2];
+            if ($expYear < 100) {
+                $expYear += 2000;
+            }
+        }
+
+        return $this->paymentMethodService->createFromCardDetails(
+            $customer,
+            [
+                'number' => $cardNumber,
+                'exp_month' => $expMonth ?? 12,
+                'exp_year' => $expYear ?? (int) date('Y'),
+                'cvc' => $row['card_cvv'] ?? '',
+                'name' => $row['card_name'] ?? '',
+            ],
+            null, // No nickname
+            false // Not default
+        );
+    }
+
+    /**
+     * Create a saved ACH payment method with a local pseudo-token.
+     *
+     * @param  Customer  $customer  The customer
+     * @param  array  $row  CSV row with routing_number, account_number, account_type, account_name
+     * @return CustomerPaymentMethod The created saved method with pseudo-token
+     */
+    protected function createSavedAchMethod(Customer $customer, array $row): CustomerPaymentMethod
+    {
+        // Pad routing number to 9 digits with leading zeros if needed
+        $routing = preg_replace('/\D/', '', $row['routing_number']);
+        $routing = str_pad($routing, 9, '0', STR_PAD_LEFT);
+
+        $accountNumber = preg_replace('/\D/', '', $row['account_number']);
+
+        return $this->paymentMethodService->createFromCheckDetails(
+            $customer,
+            [
+                'routing_number' => $routing,
+                'account_number' => $accountNumber,
+                'account_type' => strtolower($row['account_type'] ?? 'checking'),
+                'name' => $row['account_name'] ?? '',
+            ],
+            null, // No bank name
+            null, // No nickname
+            false // Not default
+        );
     }
 
     /**
@@ -795,8 +960,11 @@ class RecurringPaymentImportService
     }
 
     /**
-     * Tokenize the payment method.
-     * In production, this would call the payment gateway to create a token.
+     * Tokenize the payment method (legacy fallback).
+     *
+     * Encrypts raw card/ACH data for storage. This is only used as a fallback
+     * when gateway tokenization fails during import. Prefer creating a
+     * CustomerPaymentMethod via getOrCreateSavedPaymentMethod() instead.
      */
     protected function tokenizePaymentMethod(array $row, string $paymentType): string
     {

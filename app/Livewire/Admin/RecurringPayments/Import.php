@@ -67,7 +67,7 @@ class Import extends Component
         $this->processing = true;
 
         try {
-            $service = new RecurringPaymentImportService;
+            $service = app(RecurringPaymentImportService::class);
 
             if ($this->csvFile) {
                 $extension = strtolower($this->csvFile->getClientOriginalExtension());

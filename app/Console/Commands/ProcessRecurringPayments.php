@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\CustomerPaymentMethod;
 use App\Models\RecurringPayment;
 use App\Notifications\RecurringPaymentFailed;
 use App\Services\PaymentService;
@@ -14,6 +15,11 @@ use Illuminate\Support\Facades\Log;
  *
  * This command should be run daily via the scheduler.
  * It finds all active recurring payments with due dates and processes them.
+ *
+ * Supports three payment_method_token formats:
+ * 1. MPC gateway token (cards with a CustomerPaymentMethod record)
+ * 2. ACH pseudo-token ("ach_local_..." with encrypted bank details on CustomerPaymentMethod)
+ * 3. Legacy encrypted JSON (raw card/ACH data from old imports, pre-saved-method era)
  */
 class ProcessRecurringPayments extends Command
 {
@@ -100,16 +106,8 @@ class ProcessRecurringPayments extends Command
             }
 
             try {
-                // Decrypt the payment method token
-                $paymentData = json_decode(decrypt($recurringPayment->payment_method_token), true);
-
-                if (! $paymentData) {
-                    throw new \Exception('Invalid payment method token');
-                }
-
-                // Process the payment
-                // Note: In production, this would use the actual payment gateway
-                $result = $this->processPayment($paymentService, $recurringPayment, $paymentData);
+                // Determine token format and process accordingly
+                $result = $this->processPaymentByTokenFormat($paymentService, $recurringPayment);
 
                 if ($result['success']) {
                     $recurringPayment->recordPayment(
@@ -168,15 +166,113 @@ class ProcessRecurringPayments extends Command
     }
 
     /**
-     * Process a payment through the payment gateway.
+     * Determine the token format and route to the appropriate processing method.
      *
-     * @param  array  $paymentData  Decrypted payment method data (card/ACH details)
+     * Supports three formats:
+     * 1. Saved method token — references a CustomerPaymentMethod record
+     * 2. Legacy encrypted JSON — raw card/ACH data from old imports
+     *
+     * @return array Result with 'success', 'transaction_id', etc.
      */
-    protected function processPayment(
+    protected function processPaymentByTokenFormat(
+        PaymentService $paymentService,
+        RecurringPayment $recurringPayment
+    ): array {
+        $token = $recurringPayment->payment_method_token;
+
+        // First, check if this token matches a saved CustomerPaymentMethod
+        $savedMethod = $this->findSavedMethod($recurringPayment);
+
+        if ($savedMethod) {
+            return $this->processWithSavedMethod($paymentService, $recurringPayment, $savedMethod);
+        }
+
+        // Fall back to legacy encrypted data format
+        return $this->processWithEncryptedData($paymentService, $recurringPayment);
+    }
+
+    /**
+     * Find the CustomerPaymentMethod record that matches this recurring payment's token.
+     */
+    protected function findSavedMethod(RecurringPayment $recurringPayment): ?CustomerPaymentMethod
+    {
+        if (! $recurringPayment->customer_id) {
+            return null;
+        }
+
+        return CustomerPaymentMethod::where('customer_id', $recurringPayment->customer_id)
+            ->where('mpc_token', $recurringPayment->payment_method_token)
+            ->first();
+    }
+
+    /**
+     * Process payment using a saved CustomerPaymentMethod.
+     *
+     * For cards: charges via the MPC reusable token.
+     * For ACH: decrypts bank details from the saved method and charges via Kotapay.
+     *
+     * @return array Result with 'success', 'transaction_id', etc.
+     */
+    protected function processWithSavedMethod(
         PaymentService $paymentService,
         RecurringPayment $recurringPayment,
-        array $paymentData
+        CustomerPaymentMethod $savedMethod
     ): array {
+        $customer = $recurringPayment->customer;
+        $description = $recurringPayment->description ?? "Recurring payment - {$recurringPayment->client_name}";
+
+        if ($savedMethod->isCard()) {
+            // Card: charge via saved method token (MPC reusable token)
+            return $paymentService->chargeWithSavedMethod(
+                $customer,
+                $savedMethod,
+                (float) $recurringPayment->amount,
+                ['description' => $description]
+            );
+        }
+
+        // ACH: get decrypted bank details and charge via Kotapay
+        $bankDetails = $savedMethod->getBankDetails();
+
+        if (! $bankDetails) {
+            throw new \Exception('ACH saved method has no stored bank details');
+        }
+
+        $paymentData = [
+            'type' => 'ach',
+            'routing' => $bankDetails['routing_number'],
+            'account' => $bankDetails['account_number'],
+            'account_type' => $savedMethod->account_type ?? 'checking',
+            'name' => $customer->name,
+        ];
+
+        return $paymentService->processRecurringCharge(
+            $paymentData,
+            (float) $recurringPayment->amount,
+            $description,
+            $customer
+        );
+    }
+
+    /**
+     * Process payment using legacy encrypted payment data.
+     *
+     * This handles the old format where raw card/ACH data was encrypted
+     * and stored directly in payment_method_token.
+     *
+     * @return array Result with 'success', 'transaction_id', etc.
+     */
+    protected function processWithEncryptedData(
+        PaymentService $paymentService,
+        RecurringPayment $recurringPayment
+    ): array {
+        // Decrypt the payment method token
+        $paymentData = json_decode(decrypt($recurringPayment->payment_method_token), true);
+
+        if (! $paymentData) {
+            throw new \Exception('Invalid payment method token - could not decrypt');
+        }
+
         // Get or create customer if not exists
         $customer = $recurringPayment->customer;
         if (! $customer) {
@@ -189,17 +285,13 @@ class ProcessRecurringPayments extends Command
             $recurringPayment->save();
         }
 
-        // Process the charge
-        // - Cards go through MiPaymentChoice
-        // - ACH goes through Kotapay (requires customer object)
-        // The $paymentData array contains:
-        // - For cards: type, number, expiry, cvv, name
-        // - For ACH: type, routing, account, account_type, name
+        $description = $recurringPayment->description ?? "Recurring payment - {$recurringPayment->client_name}";
+
         return $paymentService->processRecurringCharge(
             $paymentData,
             (float) $recurringPayment->amount,
-            $recurringPayment->description ?? "Recurring payment - {$recurringPayment->client_name}",
-            $customer // Pass customer for ACH payments (Kotapay)
+            $description,
+            $customer
         );
     }
 
