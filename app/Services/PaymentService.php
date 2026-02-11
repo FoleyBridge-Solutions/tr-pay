@@ -373,6 +373,10 @@ class PaymentService
             return 'This account appears to be closed. Please use a different account.';
         }
 
+        if (str_contains($errorLower, 'curl error') || str_contains($errorLower, 'timed out') || str_contains($errorLower, 'connection failed')) {
+            return 'Payment gateway temporarily unavailable. Please wait a moment and try again.';
+        }
+
         return 'ACH payment could not be processed. Please try again or use a different payment method.';
     }
 
@@ -577,10 +581,19 @@ class PaymentService
             // Card payments continue to use MiPaymentChoice
             // Note: QuickPaymentsService::charge() expects amount in DOLLARS, not cents
 
-            // Parse expiry from MM/YY format with safe defaults
+            // Parse expiry — supports MM/YY (e.g. "06/28") and M/D/YYYY (e.g. "6/1/2028")
             $expParts = explode('/', $paymentData['expiry'] ?? '');
-            $expMonth = isset($expParts[0]) ? (int) $expParts[0] : 12;
-            $expYear = isset($expParts[1]) ? (int) ('20'.$expParts[1]) : (int) date('Y');
+
+            if (count($expParts) === 3) {
+                // M/D/YYYY format — month is first part, year is third part
+                $expMonth = (int) $expParts[0];
+                $expYear = (int) $expParts[2];
+            } else {
+                // MM/YY format (default) — month is first part, year is second part
+                $expMonth = isset($expParts[0]) ? (int) $expParts[0] : 12;
+                $rawYear = isset($expParts[1]) ? $expParts[1] : date('y');
+                $expYear = strlen((string) $rawYear) <= 2 ? (int) ('20'.$rawYear) : (int) $rawYear;
+            }
 
             $tokenResponse = $this->quickPayments->createQpToken([
                 'number' => $paymentData['number'],
@@ -760,35 +773,45 @@ class PaymentService
             $totalAmount = Money::addDollars($invoiceAmount, $planFee);
             $durationMonths = (int) $planData['planDuration'];
 
-            // Calculate 30% down payment using Money for precision
-            $downPaymentPercent = PaymentPlanCalculator::DOWN_PAYMENT_PERCENT;
-            $downPayment = Money::percentOf($totalAmount, $downPaymentPercent * 100);
+            // Calculate down payment (custom or standard 30%)
+            $customDownPayment = isset($planData['customDownPayment']) ? (float) $planData['customDownPayment'] : null;
+            if ($customDownPayment !== null) {
+                $downPayment = Money::round(max(0, min($customDownPayment, $totalAmount)));
+            } else {
+                $downPaymentPercent = PaymentPlanCalculator::DOWN_PAYMENT_PERCENT;
+                $downPayment = Money::percentOf($totalAmount, $downPaymentPercent * 100);
+            }
             $remainingBalance = Money::subtractDollars($totalAmount, $downPayment);
 
             // Calculate monthly payment - divide remaining by months, then round
-            $monthlyPayment = Money::round($remainingBalance / $durationMonths);
+            $monthlyPayment = $remainingBalance > 0 && $durationMonths > 0
+                ? Money::round($remainingBalance / $durationMonths)
+                : 0;
 
             // Generate unique plan ID
             $planId = PaymentPlan::generatePlanId();
 
-            // Process down payment immediately
-            $downPaymentResult = $this->processDownPayment(
-                $customer,
-                $downPayment,
-                $paymentMethodData,
-                $paymentMethodToken,
-                $planId,
-                $clientInfo['client_name'] ?? 'Unknown',
-                $splitDownPayment
-            );
+            // Process down payment immediately (skip if $0)
+            $downPaymentResult = ['success' => true, 'transaction_id' => null];
+            if ($downPayment > 0) {
+                $downPaymentResult = $this->processDownPayment(
+                    $customer,
+                    $downPayment,
+                    $paymentMethodData,
+                    $paymentMethodToken,
+                    $planId,
+                    $clientInfo['client_name'] ?? 'Unknown',
+                    $splitDownPayment
+                );
 
-            if (! $downPaymentResult['success']) {
-                DB::rollBack();
+                if (! $downPaymentResult['success']) {
+                    DB::rollBack();
 
-                return [
-                    'success' => false,
-                    'error' => 'Down payment failed: '.($downPaymentResult['error'] ?? 'Unknown error'),
-                ];
+                    return [
+                        'success' => false,
+                        'error' => 'Down payment failed: '.($downPaymentResult['error'] ?? 'Unknown error'),
+                    ];
+                }
             }
 
             // Create the payment plan record
@@ -816,32 +839,39 @@ class PaymentService
                 'metadata' => [
                     'payment_schedule' => $planData['paymentSchedule'] ?? [],
                     'client_name' => $clientInfo['client_name'] ?? null,
-                    'down_payment_transaction_id' => $downPaymentResult['transaction_id'],
+                    'down_payment_transaction_id' => $downPaymentResult['transaction_id'] ?? null,
                     'down_payment_split' => $splitDownPayment,
+                    'custom_down_payment' => $customDownPayment !== null,
+                    'fee_waived' => $planFee == 0,
                     'created_at' => now()->toIso8601String(),
                 ],
             ]);
 
-            // Record the down payment in payments table
-            $isAchDownPayment = $paymentMethodType === self::TYPE_ACH;
+            // Record the down payment in payments table (skip if $0)
+            if ($downPayment > 0) {
+                $isAchDownPayment = $paymentMethodType === self::TYPE_ACH;
+                $downPaymentDescription = $customDownPayment !== null
+                    ? "Down payment for plan {$planId}"
+                    : "Down payment (30%) for plan {$planId}";
 
-            Payment::create([
-                'customer_id' => $customer->id,
-                'client_id' => $clientInfo['client_id'],
-                'payment_plan_id' => $paymentPlan->id,
-                'transaction_id' => $downPaymentResult['transaction_id'],
-                'amount' => $downPayment,
-                'fee' => 0,
-                'total_amount' => $downPayment,
-                'payment_method' => $paymentMethodType,
-                'payment_method_last_four' => $lastFour,
-                'status' => $isAchDownPayment ? Payment::STATUS_PROCESSING : Payment::STATUS_COMPLETED,
-                'is_automated' => false,
-                'description' => "Down payment (30%) for plan {$planId}",
-                'processed_at' => $isAchDownPayment ? null : now(),
-                'payment_vendor' => $isAchDownPayment ? ($downPaymentResult['payment_vendor'] ?? 'kotapay') : null,
-                'vendor_transaction_id' => $isAchDownPayment ? ($downPaymentResult['transaction_id'] ?? null) : null,
-            ]);
+                Payment::create([
+                    'customer_id' => $customer->id,
+                    'client_id' => $clientInfo['client_id'],
+                    'payment_plan_id' => $paymentPlan->id,
+                    'transaction_id' => $downPaymentResult['transaction_id'],
+                    'amount' => $downPayment,
+                    'fee' => 0,
+                    'total_amount' => $downPayment,
+                    'payment_method' => $paymentMethodType,
+                    'payment_method_last_four' => $lastFour,
+                    'status' => $isAchDownPayment ? Payment::STATUS_PROCESSING : Payment::STATUS_COMPLETED,
+                    'is_automated' => false,
+                    'description' => $downPaymentDescription,
+                    'processed_at' => $isAchDownPayment ? null : now(),
+                    'payment_vendor' => $isAchDownPayment ? ($downPaymentResult['payment_vendor'] ?? 'kotapay') : null,
+                    'vendor_transaction_id' => $isAchDownPayment ? ($downPaymentResult['transaction_id'] ?? null) : null,
+                ]);
+            }
 
             // Create scheduled payment records for the remaining installments
             $paymentPlan->createScheduledPayments();
