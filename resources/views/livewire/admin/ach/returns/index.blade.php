@@ -59,7 +59,11 @@
                     @foreach ($returns as $return)
                         <flux:table.row wire:key="return-{{ $return->id }}">
                             <flux:table.cell class="text-zinc-500">
-                                {{ $return->return_date?->format('M j, Y') }}
+                                @if($return->return_date)
+                                    <local-time datetime="{{ $return->return_date->toIso8601String() }}" format="date"></local-time>
+                                @else
+                                    -
+                                @endif
                             </flux:table.cell>
                             <flux:table.cell>
                                 @if($return->isNoc())

@@ -497,7 +497,7 @@
                 @endif
 
                 @if($paymentMethodType === 'card')
-                    <div class="space-y-4">
+                    <div wire:key="payment-fields-card" class="space-y-4">
                         <flux:field>
                             <flux:label>Card Number</flux:label>
                             <flux:input wire:model="cardNumber" placeholder="1234 5678 9012 3456" />
@@ -520,7 +520,7 @@
                         </flux:field>
                     </div>
                 @elseif($paymentMethodType === 'ach')
-                    <div class="space-y-4">
+                    <div wire:key="payment-fields-ach" class="space-y-4">
                         <flux:field>
                             <flux:label>Account Holder Name</flux:label>
                             <flux:input wire:model="accountName" placeholder="John Doe" />
@@ -553,7 +553,7 @@
                         </flux:field>
                     </div>
                 @elseif($paymentMethodType === 'saved')
-                    <div class="space-y-4">
+                    <div wire:key="payment-fields-saved" class="space-y-4">
                         @if($savedPaymentMethods->count() === 0)
                             <div class="text-center py-8 text-zinc-500">
                                 <flux:icon name="credit-card" class="w-12 h-12 mx-auto mb-2 opacity-50" />
@@ -710,7 +710,7 @@
                 <div class="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-4 mb-6 space-y-2 text-left">
                     <div class="flex justify-between">
                         <span class="text-zinc-500">Date:</span>
-                        <span class="font-medium">{{ now()->format('F j, Y') }}</span>
+                        <span class="font-medium"><local-time datetime="{{ now()->toIso8601String() }}" format="date"></local-time></span>
                     </div>
                     @php $successShowCardFee = $this->getCreditCardFee() > 0; @endphp
                     @if($feeIncludedInCustomAmount && $customPaymentAmount && $successShowCardFee)

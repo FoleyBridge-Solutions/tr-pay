@@ -148,8 +148,27 @@ class ProcessScheduledSinglePayment implements ShouldQueue
                     'description' => $this->payment->description ?? 'Scheduled payment',
                 ]);
 
-                if (! $chargeResponse || empty($chargeResponse['TransactionKey'])) {
-                    $errorMessage = $chargeResponse['ResponseStatus']['Message'] ?? 'Payment failed';
+                if (! $chargeResponse) {
+                    $this->handleFailure('No response received from payment gateway.');
+
+                    return;
+                }
+
+                // Gateway returns TransactionId (not TransactionKey)
+                $gatewayTransactionId = $chargeResponse['PnRef'] ?? $chargeResponse['TransactionId'] ?? null;
+
+                if (empty($gatewayTransactionId)) {
+                    Log::error('Scheduled card charge response missing transaction ID', [
+                        'payment_id' => $this->payment->id,
+                        'transaction_id' => $this->payment->transaction_id,
+                        'response' => $chargeResponse,
+                    ]);
+
+                    $errorMessage = $chargeResponse['ResponseMessage']
+                        ?? $chargeResponse['ResponseStatus']['Message']
+                        ?? $chargeResponse['ResultText']
+                        ?? 'Payment failed — no transaction ID returned from gateway';
+
                     $this->handleFailure($errorMessage);
 
                     return;
@@ -159,20 +178,34 @@ class ProcessScheduledSinglePayment implements ShouldQueue
                 $this->payment->update([
                     'status' => Payment::STATUS_COMPLETED,
                     'processed_at' => now(),
-                    'vendor_transaction_id' => $chargeResponse['TransactionKey'] ?? null,
+                    'vendor_transaction_id' => (string) $gatewayTransactionId,
                 ]);
 
                 Log::info('Scheduled card payment processed successfully', [
                     'payment_id' => $this->payment->id,
                     'transaction_id' => $this->payment->transaction_id,
-                    'gateway_transaction_id' => $chargeResponse['TransactionKey'],
+                    'gateway_transaction_id' => $gatewayTransactionId,
                     'amount' => $this->payment->amount,
                 ]);
             }
 
             // Write to PracticeCS if enabled
             if (config('practicecs.payment_integration.enabled')) {
-                $this->writeToPracticeCs($metadata);
+                if ($isAch) {
+                    // ACH: Defer PracticeCS write until settlement is confirmed
+                    $practiceCsPayload = $this->buildPracticeCsPayload($metadata);
+                    $existingMetadata = $this->payment->metadata ?? [];
+                    $existingMetadata['practicecs_data'] = $practiceCsPayload;
+                    $this->payment->update(['metadata' => $existingMetadata]);
+
+                    Log::info('ACH payment: PracticeCS write deferred until settlement', [
+                        'payment_id' => $this->payment->id,
+                        'transaction_id' => $this->payment->transaction_id,
+                    ]);
+                } else {
+                    // Card payments: Write to PracticeCS immediately
+                    $this->writeToPracticeCs($metadata);
+                }
             }
 
             // Send success email
@@ -208,12 +241,14 @@ class ProcessScheduledSinglePayment implements ShouldQueue
     }
 
     /**
-     * Write payment to PracticeCS.
+     * Build the PracticeCS payload without writing it.
+     *
+     * Used for both immediate writes (cards) and deferred writes (ACH).
+     *
+     * @return array Structured payload with 'payment' key for writeDeferredPayment()
      */
-    protected function writeToPracticeCs(array $metadata): void
+    protected function buildPracticeCsPayload(array $metadata): array
     {
-        $writer = app(PracticeCsPaymentWriter::class);
-
         $methodType = $this->payment->payment_method === 'credit_card' ? 'credit_card' : 'ach';
         $invoices = $metadata['invoices'] ?? [];
 
@@ -223,34 +258,49 @@ class ProcessScheduledSinglePayment implements ShouldQueue
         $clientKey = $paymentRepo->resolveClientKey($clientId);
 
         if (! $clientKey) {
-            Log::error('Failed to resolve client_KEY for PracticeCS write', [
+            Log::error('Failed to resolve client_KEY for PracticeCS payload', [
                 'payment_id' => $this->payment->id,
                 'client_id' => $clientId,
             ]);
 
+            return ['payment' => null];
+        }
+
+        return [
+            'payment' => [
+                'client_KEY' => $clientKey,
+                'amount' => $this->payment->amount,
+                'reference' => $this->payment->transaction_id,
+                'comments' => "Scheduled payment - {$methodType}",
+                'internal_comments' => json_encode([
+                    'source' => 'tr-pay-scheduled',
+                    'transaction_id' => $this->payment->transaction_id,
+                    'payment_method' => $methodType,
+                    'fee' => $this->payment->fee,
+                    'processed_at' => now()->toIso8601String(),
+                ]),
+                'staff_KEY' => config('practicecs.payment_integration.staff_key'),
+                'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
+                'ledger_type_KEY' => config("practicecs.payment_integration.ledger_types.{$methodType}"),
+                'subtype_KEY' => config("practicecs.payment_integration.payment_subtypes.{$methodType}"),
+                'invoices' => $invoices,
+            ],
+        ];
+    }
+
+    /**
+     * Write payment to PracticeCS.
+     */
+    protected function writeToPracticeCs(array $metadata): void
+    {
+        $payload = $this->buildPracticeCsPayload($metadata);
+
+        if (! $payload['payment']) {
             return;
         }
 
-        $practiceCsData = [
-            'client_KEY' => $clientKey,
-            'amount' => $this->payment->amount,
-            'reference' => $this->payment->transaction_id,
-            'comments' => "Scheduled payment - {$methodType}",
-            'internal_comments' => json_encode([
-                'source' => 'tr-pay-scheduled',
-                'transaction_id' => $this->payment->transaction_id,
-                'payment_method' => $methodType,
-                'fee' => $this->payment->fee,
-                'processed_at' => now()->toIso8601String(),
-            ]),
-            'staff_KEY' => config('practicecs.payment_integration.staff_key'),
-            'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
-            'ledger_type_KEY' => config("practicecs.payment_integration.ledger_types.{$methodType}"),
-            'subtype_KEY' => config("practicecs.payment_integration.payment_subtypes.{$methodType}"),
-            'invoices' => $invoices,
-        ];
-
-        $result = $writer->writePayment($practiceCsData);
+        $writer = app(PracticeCsPaymentWriter::class);
+        $result = $writer->writeDeferredPayment($payload);
 
         if (! $result['success']) {
             Log::error('Failed to write scheduled payment to PracticeCS', [

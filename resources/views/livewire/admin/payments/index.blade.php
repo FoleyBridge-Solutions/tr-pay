@@ -123,7 +123,7 @@
                                 @endif
                             </flux:table.cell>
                             <flux:table.cell class="text-zinc-500">
-                                {{ $payment->created_at->format('M j, Y g:i A') }}
+                                <local-time datetime="{{ $payment->created_at->toIso8601String() }}"></local-time>
                             </flux:table.cell>
                             <flux:table.cell>
                                 <flux:button wire:click="viewPayment({{ $payment->id }})" variant="ghost" size="sm" icon="eye">
@@ -142,96 +142,109 @@
     </flux:card>
 
     {{-- Payment Details Modal --}}
-    <flux:modal wire:model="showDetails" class="max-w-lg">
-        @if($selectedPayment)
-            <div class="p-6">
-                <flux:heading size="lg" class="mb-4">Payment Details</flux:heading>
-                
-                <div class="space-y-4">
+    <flux:modal name="payment-details" class="max-w-lg" @close="closeDetails">
+        <div class="p-6" x-data="{ get d() { return $wire.paymentDetails } }">
+            <flux:heading size="lg" class="mb-4">Payment Details</flux:heading>
+            
+            <div class="space-y-4">
+                <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
+                    <span class="text-zinc-500">Transaction ID</span>
+                    <span class="font-mono text-sm" x-text="d.transaction_id ?? '-'"></span>
+                </div>
+                <template x-if="d.client_name || d.client_id">
                     <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
-                        <span class="text-zinc-500">Transaction ID</span>
-                        <span class="font-mono text-sm">{{ $selectedPayment->transaction_id }}</span>
+                        <span class="text-zinc-500">Client</span>
+                        <span class="text-right">
+                            <template x-if="d.client_name">
+                                <span class="font-medium" x-text="d.client_name"></span>
+                            </template>
+                            <template x-if="d.client_id">
+                                <span class="text-zinc-500 text-sm block" x-text="d.client_id"></span>
+                            </template>
+                        </span>
                     </div>
-                    @php
-                        $metadata = $selectedPayment->metadata ?? [];
-                        $clientName = $metadata['client_name'] ?? $selectedPayment->customer?->name ?? null;
-                        $clientId = $metadata['client_id'] ?? $selectedPayment->client_id ?? null;
-                    @endphp
-                    @if($clientName || $clientId)
-                        <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
-                            <span class="text-zinc-500">Client</span>
-                            <span class="text-right">
-                                @if($clientName)
-                                    <span class="font-medium">{{ $clientName }}</span>
-                                @endif
-                                @if($clientId)
-                                    <span class="text-zinc-500 text-sm block">{{ $clientId }}</span>
-                                @endif
-                            </span>
-                        </div>
-                    @endif
-                    <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
-                        <span class="text-zinc-500">Amount</span>
-                        <span class="font-medium">${{ number_format($selectedPayment->amount, 2) }}</span>
-                    </div>
-                    @if($selectedPayment->fee > 0)
+                </template>
+                <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
+                    <span class="text-zinc-500">Amount</span>
+                    <span class="font-medium" x-text="'$' + (d.amount ?? '0.00')"></span>
+                </div>
+                <template x-if="d.has_fee">
+                    <div>
                         <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
                             <span class="text-zinc-500">Fee</span>
-                            <span>${{ number_format($selectedPayment->fee, 2) }}</span>
+                            <span x-text="'$' + (d.fee ?? '0.00')"></span>
                         </div>
                         <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
                             <span class="text-zinc-500">Total</span>
-                            <span class="font-medium">${{ number_format($selectedPayment->total_amount, 2) }}</span>
+                            <span class="font-medium" x-text="'$' + (d.total_amount ?? '0.00')"></span>
                         </div>
-                    @endif
-                    <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
-                        <span class="text-zinc-500">Payment Method</span>
-                        <span class="capitalize">{{ $selectedPayment->payment_method }} @if($selectedPayment->payment_method_last_four)****{{ $selectedPayment->payment_method_last_four }}@endif</span>
                     </div>
-                    <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
-                        <span class="text-zinc-500">Status</span>
-                        <span>
-                            @if($selectedPayment->status === 'completed')
-                                <flux:badge color="green" size="sm">Completed</flux:badge>
-                            @elseif($selectedPayment->status === 'processing')
-                                <flux:badge color="blue" size="sm">Processing</flux:badge>
-                            @elseif($selectedPayment->status === 'pending')
-                                <flux:badge color="amber" size="sm">Pending</flux:badge>
-                            @elseif($selectedPayment->status === 'failed')
-                                <flux:badge color="red" size="sm">Failed</flux:badge>
-                            @else
-                                <flux:badge size="sm">{{ ucfirst($selectedPayment->status) }}</flux:badge>
-                            @endif
-                        </span>
-                    </div>
-                    @if($selectedPayment->failure_reason)
-                        <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
-                            <span class="text-zinc-500">Failure Reason</span>
-                            <span class="text-red-600">{{ $selectedPayment->failure_reason }}</span>
-                        </div>
-                    @endif
-                    @if($selectedPayment->paymentPlan)
-                        <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
-                            <span class="text-zinc-500">Payment Plan</span>
-                            <span>Payment {{ $selectedPayment->payment_number }} of {{ $selectedPayment->paymentPlan->duration_months }}</span>
-                        </div>
-                    @endif
-                    <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
-                        <span class="text-zinc-500">Created</span>
-                        <span>{{ $selectedPayment->created_at->format('M j, Y g:i A') }}</span>
-                    </div>
-                    @if($selectedPayment->processed_at)
-                        <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
-                            <span class="text-zinc-500">Processed</span>
-                            <span>{{ $selectedPayment->processed_at->format('M j, Y g:i A') }}</span>
-                        </div>
-                    @endif
+                </template>
+                <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
+                    <span class="text-zinc-500">Payment Method</span>
+                    <span>
+                        <span class="capitalize" x-text="d.payment_method ?? '-'"></span><span x-show="d.payment_method_last_four" x-text="'****' + (d.payment_method_last_four ?? '')"></span>
+                    </span>
                 </div>
-
-                <div class="mt-6 flex justify-end">
-                    <flux:button wire:click="closeDetails" variant="ghost">Close</flux:button>
+                <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
+                    <span class="text-zinc-500">Status</span>
+                    <span>
+                        <template x-if="d.status === 'completed'">
+                            <flux:badge color="green" size="sm">Completed</flux:badge>
+                        </template>
+                        <template x-if="d.status === 'processing'">
+                            <flux:badge color="blue" size="sm">Processing</flux:badge>
+                        </template>
+                        <template x-if="d.status === 'pending'">
+                            <flux:badge color="amber" size="sm">Pending</flux:badge>
+                        </template>
+                        <template x-if="d.status === 'failed'">
+                            <flux:badge color="red" size="sm">Failed</flux:badge>
+                        </template>
+                        <template x-if="d.status === 'refunded'">
+                            <flux:badge color="zinc" size="sm">Refunded</flux:badge>
+                        </template>
+                        <template x-if="!d.status">
+                            <span class="text-zinc-400">-</span>
+                        </template>
+                    </span>
                 </div>
+                <template x-if="d.failure_reason">
+                    <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
+                        <span class="text-zinc-500">Failure Reason</span>
+                        <span class="text-red-600" x-text="d.failure_reason"></span>
+                    </div>
+                </template>
+                <template x-if="d.has_plan">
+                    <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
+                        <span class="text-zinc-500">Payment Plan</span>
+                        <span x-text="'Payment ' + (d.payment_number ?? '') + ' of ' + (d.plan_duration ?? '')"></span>
+                    </div>
+                </template>
+                <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
+                    <span class="text-zinc-500">Created</span>
+                    <span>
+                        <template x-if="d.created_at">
+                            <local-time x-bind:datetime="d.created_at"></local-time>
+                        </template>
+                        <template x-if="!d.created_at">
+                            <span>-</span>
+                        </template>
+                    </span>
+                </div>
+                <template x-if="d.processed_at">
+                    <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
+                        <span class="text-zinc-500">Processed</span>
+                        <span><local-time x-bind:datetime="d.processed_at"></local-time></span>
+                    </div>
+                </template>
             </div>
-        @endif
+
+            <div class="mt-6 flex justify-end">
+                <flux:modal.close>
+                    <flux:button variant="ghost">Close</flux:button>
+                </flux:modal.close>
+            </div>
+        </div>
     </flux:modal>
 </div>

@@ -3,14 +3,13 @@
 namespace App\Livewire\Admin\Ach\Batches;
 
 use App\Models\Ach\AchBatch;
-use App\Services\Ach\AchFileService;
 use Flux\Flux;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class Index extends Component
 {
     use WithPagination;
@@ -42,31 +41,6 @@ class Index extends Component
         } else {
             $this->sortField = $field;
             $this->sortDirection = 'asc';
-        }
-    }
-
-    public function generateFile(int $batchId): void
-    {
-        $batch = AchBatch::findOrFail($batchId);
-
-        if ($batch->ach_file_id) {
-            Flux::toast('Batch already has a file generated.', variant: 'danger');
-
-            return;
-        }
-
-        if ($batch->entries()->count() === 0) {
-            Flux::toast('Batch has no entries.', variant: 'danger');
-
-            return;
-        }
-
-        try {
-            $achService = app(AchFileService::class);
-            $achFile = $achService->generateFile($batch);
-            Flux::toast("NACHA file generated: {$achFile->filename}", variant: 'success');
-        } catch (\Exception $e) {
-            Flux::toast("Generation failed: {$e->getMessage()}", variant: 'danger');
         }
     }
 

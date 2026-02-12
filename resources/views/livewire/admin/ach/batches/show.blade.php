@@ -28,8 +28,8 @@
             </div>
             <flux:subheading>{{ $batch->company_entry_description }} - SEC Code: {{ $batch->sec_code }}</flux:subheading>
         </div>
-        <flux:button href="{{ route('admin.ach.files.index') }}" variant="ghost" icon="arrow-left">
-            Back to Files
+        <flux:button href="{{ route('admin.ach.batches.index') }}" variant="ghost" icon="arrow-left">
+            Back to Batches
         </flux:button>
     </div>
 
@@ -47,79 +47,21 @@
                 </div>
                 <div>
                     <flux:text class="text-zinc-500 text-sm">Effective Date</flux:text>
-                    <flux:heading size="lg">{{ $batch->effective_entry_date?->format('M j, Y') }}</flux:heading>
+                    <flux:heading size="lg">
+                        @if($batch->effective_entry_date)
+                            <local-time datetime="{{ $batch->effective_entry_date->toIso8601String() }}" format="date"></local-time>
+                        @else
+                            -
+                        @endif
+                    </flux:heading>
                 </div>
                 <div>
                     <flux:text class="text-zinc-500 text-sm">Created</flux:text>
-                    <flux:heading size="lg">{{ $batch->created_at->format('M j, Y') }}</flux:heading>
+                    <flux:heading size="lg"><local-time datetime="{{ $batch->created_at->toIso8601String() }}" format="date"></local-time></flux:heading>
                 </div>
-            </div>
-
-            {{-- Actions --}}
-            <div class="mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-700 flex flex-wrap gap-3">
-                @if (in_array($batch->status, ['pending', 'ready']) && !$batch->ach_file_id && $batch->entry_count > 0)
-                    <flux:button 
-                        wire:click="generateFile"
-                        wire:confirm="Generate NACHA file for this batch?"
-                        variant="primary"
-                        icon="document-arrow-down"
-                    >
-                        Generate NACHA File
-                    </flux:button>
-                @endif
-
-                @if ($batch->file)
-                    <flux:button 
-                        wire:click="downloadFile"
-                        variant="filled"
-                        icon="arrow-down-tray"
-                    >
-                        Download File
-                    </flux:button>
-
-                    @if ($batch->status === 'generated')
-                        <flux:button 
-                            wire:click="markAsSubmitted"
-                            wire:confirm="Mark this batch as submitted to Kotapay?"
-                            variant="filled"
-                            icon="paper-airplane"
-                        >
-                            Mark as Submitted
-                        </flux:button>
-                    @endif
-                @endif
             </div>
         </div>
     </flux:card>
-
-    {{-- File Info (if generated) --}}
-    @if ($batch->file)
-        <flux:card class="mb-6">
-            <div class="p-6">
-                <flux:heading size="lg" class="mb-4">Generated File</flux:heading>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div>
-                        <flux:text class="text-zinc-500 text-sm">Filename</flux:text>
-                        <flux:text class="font-mono text-sm">{{ $batch->file->filename }}</flux:text>
-                    </div>
-                    <div>
-                        <flux:text class="text-zinc-500 text-sm">Generated</flux:text>
-                        <flux:text>{{ $batch->file->generated_at?->format('M j, Y g:i A') }}</flux:text>
-                    </div>
-                    <div>
-                        <flux:text class="text-zinc-500 text-sm">File Status</flux:text>
-                        <flux:text>{{ ucfirst($batch->file->status) }}</flux:text>
-                    </div>
-                    @if ($batch->file->submitted_at)
-                        <div>
-                            <flux:text class="text-zinc-500 text-sm">Submitted</flux:text>
-                            <flux:text>{{ $batch->file->submitted_at->format('M j, Y g:i A') }}</flux:text>
-                        </div>
-                    @endif
-                </div>
-            </div>
-        </flux:card>
-    @endif
 
     {{-- Entries Table --}}
     <flux:card>

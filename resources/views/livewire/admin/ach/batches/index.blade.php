@@ -2,7 +2,7 @@
     <div class="flex items-center justify-between mb-8">
         <div>
             <flux:heading size="xl">ACH Batches</flux:heading>
-            <flux:subheading>Manage ACH batches and generate NACHA files</flux:subheading>
+            <flux:subheading>Manage ACH batches</flux:subheading>
         </div>
     </div>
 
@@ -89,29 +89,19 @@
                                 <span class="font-medium">${{ number_format($batch->total_debit_dollars, 2) }}</span>
                             </flux:table.cell>
                             <flux:table.cell class="text-zinc-500">
-                                {{ $batch->effective_entry_date?->format('M j, Y') }}
+                                @if($batch->effective_entry_date)
+                                    <local-time datetime="{{ $batch->effective_entry_date->toIso8601String() }}" format="date"></local-time>
+                                @else
+                                    -
+                                @endif
                             </flux:table.cell>
                             <flux:table.cell class="text-zinc-500">
-                                {{ $batch->created_at->format('M j, Y g:i A') }}
+                                <local-time datetime="{{ $batch->created_at->toIso8601String() }}"></local-time>
                             </flux:table.cell>
                             <flux:table.cell>
-                                <div class="flex gap-1">
-                                    <flux:button href="{{ route('admin.ach.batches.show', $batch) }}" variant="ghost" size="sm" icon="eye">
-                                        View
-                                    </flux:button>
-                                    @if (in_array($batch->status, ['pending', 'ready']) && !$batch->ach_file_id && $batch->entries_count > 0)
-                                        <flux:button 
-                                            wire:click="generateFile({{ $batch->id }})"
-                                            wire:confirm="Generate NACHA file for batch {{ $batch->batch_number }}?"
-                                            variant="ghost" 
-                                            size="sm" 
-                                            icon="document-arrow-down"
-                                            class="text-green-600 hover:text-green-700"
-                                        >
-                                            Generate
-                                        </flux:button>
-                                    @endif
-                                </div>
+                                <flux:button href="{{ route('admin.ach.batches.show', $batch) }}" variant="ghost" size="sm" icon="eye">
+                                    View
+                                </flux:button>
                             </flux:table.cell>
                         </flux:table.row>
                     @endforeach

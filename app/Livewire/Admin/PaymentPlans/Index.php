@@ -15,7 +15,7 @@ use Livewire\WithPagination;
  *
  * Lists all payment plans with filtering and management actions.
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class Index extends Component
 {
     use WithPagination;
@@ -28,7 +28,19 @@ class Index extends Component
 
     public ?PaymentPlan $selectedPlan = null;
 
-    public bool $showDetails = false;
+    /**
+     * Pre-formatted plan details for Alpine display (bypasses modal morph issues).
+     *
+     * @var array<string, mixed>
+     */
+    public array $planDetails = [];
+
+    /**
+     * Serialized payment schedule rows for Alpine x-for display.
+     *
+     * @var array<int, array<string, mixed>>
+     */
+    public array $planPayments = [];
 
     public bool $showCancelModal = false;
 
@@ -55,7 +67,9 @@ class Index extends Component
         $this->selectedPlan = PaymentPlan::with(['payments' => function ($q) {
             $q->orderBy('payment_number');
         }])->find($id);
-        $this->showDetails = true;
+        $this->planDetails = $this->formatPlanDetails($this->selectedPlan);
+        $this->planPayments = $this->formatPlanPayments($this->selectedPlan);
+        $this->modal('plan-details')->show();
     }
 
     /**
@@ -63,8 +77,18 @@ class Index extends Component
      */
     public function closeDetails(): void
     {
-        $this->showDetails = false;
         $this->selectedPlan = null;
+        $this->planDetails = [];
+        $this->planPayments = [];
+    }
+
+    /**
+     * Reset cancel modal state when closed.
+     */
+    public function resetCancelModal(): void
+    {
+        $this->showCancelModal = false;
+        $this->cancelReason = '';
     }
 
     /**
@@ -114,6 +138,51 @@ class Index extends Component
         $this->cancelReason = '';
 
         Flux::toast('Payment plan cancelled successfully.');
+    }
+
+    /**
+     * Format plan data for Alpine display inside the modal.
+     *
+     * @return array<string, mixed>
+     */
+    protected function formatPlanDetails(?PaymentPlan $plan): array
+    {
+        if (! $plan) {
+            return [];
+        }
+
+        return [
+            'id' => $plan->id,
+            'plan_id' => $plan->plan_id ?? '-',
+            'total_amount' => number_format($plan->total_amount, 2),
+            'invoice_amount' => number_format($plan->invoice_amount ?? 0, 2),
+            'plan_fee' => number_format($plan->plan_fee ?? 0, 2),
+            'monthly_payment' => number_format($plan->monthly_payment, 2),
+            'duration_months' => $plan->duration_months ?? '-',
+            'amount_paid' => number_format($plan->amount_paid ?? 0, 2),
+            'amount_remaining' => number_format($plan->amount_remaining ?? 0, 2),
+            'status' => $plan->status,
+            'can_cancel' => in_array($plan->status, ['active', 'past_due']),
+        ];
+    }
+
+    /**
+     * Format plan payments for Alpine x-for display.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    protected function formatPlanPayments(?PaymentPlan $plan): array
+    {
+        if (! $plan || ! $plan->payments) {
+            return [];
+        }
+
+        return $plan->payments->map(fn ($payment) => [
+            'payment_number' => $payment->payment_number,
+            'amount' => number_format($payment->amount, 2),
+            'scheduled_date' => $payment->scheduled_date?->toIso8601String(),
+            'status' => $payment->status,
+        ])->toArray();
     }
 
     /**

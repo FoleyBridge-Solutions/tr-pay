@@ -23,7 +23,7 @@ use Livewire\Component;
  *
  * Manual entry form for creating recurring payments.
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class Create extends Component
 {
     use HasSavedPaymentMethodSelection;

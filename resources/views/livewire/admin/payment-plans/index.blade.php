@@ -99,7 +99,7 @@
                             </flux:table.cell>
                             <flux:table.cell class="text-zinc-500">
                                 @if($plan->next_payment_date)
-                                    {{ $plan->next_payment_date->format('M j, Y') }}
+                                    <local-time datetime="{{ $plan->next_payment_date->toIso8601String() }}" format="date"></local-time>
                                 @else
                                     -
                                 @endif
@@ -128,104 +128,110 @@
     </flux:card>
 
     {{-- Plan Details Modal --}}
-    <flux:modal wire:model="showDetails" class="max-w-2xl">
-        @if($selectedPlan)
-            <div class="p-6">
-                <flux:heading size="lg" class="mb-4">Payment Plan Details</flux:heading>
-                
-                <div class="grid grid-cols-2 gap-4 mb-6">
-                    <div class="space-y-3">
-                        <div>
-                            <span class="text-zinc-500 text-sm">Plan ID</span>
-                            <p class="font-mono text-sm">{{ $selectedPlan->plan_id }}</p>
-                        </div>
-                        <div>
-                            <span class="text-zinc-500 text-sm">Total Amount</span>
-                            <p class="font-medium">${{ number_format($selectedPlan->total_amount, 2) }}</p>
-                        </div>
-                        <div>
-                            <span class="text-zinc-500 text-sm">Invoice Amount</span>
-                            <p>${{ number_format($selectedPlan->invoice_amount, 2) }}</p>
-                        </div>
-                        <div>
-                            <span class="text-zinc-500 text-sm">Plan Fee</span>
-                            <p>${{ number_format($selectedPlan->plan_fee, 2) }}</p>
-                        </div>
+    <flux:modal name="plan-details" class="max-w-2xl" @close="closeDetails">
+        <div class="p-6" x-data="{ get d() { return $wire.planDetails }, get payments() { return $wire.planPayments } }">
+            <flux:heading size="lg" class="mb-4">Payment Plan Details</flux:heading>
+            
+            <div class="grid grid-cols-2 gap-4 mb-6">
+                <div class="space-y-3">
+                    <div>
+                        <span class="text-zinc-500 text-sm">Plan ID</span>
+                        <p class="font-mono text-sm" x-text="d.plan_id ?? '-'"></p>
                     </div>
-                    <div class="space-y-3">
-                        <div>
-                            <span class="text-zinc-500 text-sm">Monthly Payment</span>
-                            <p class="font-medium">${{ number_format($selectedPlan->monthly_payment, 2) }}</p>
-                        </div>
-                        <div>
-                            <span class="text-zinc-500 text-sm">Duration</span>
-                            <p>{{ $selectedPlan->duration_months }} months</p>
-                        </div>
-                        <div>
-                            <span class="text-zinc-500 text-sm">Amount Paid</span>
-                            <p>${{ number_format($selectedPlan->amount_paid, 2) }}</p>
-                        </div>
-                        <div>
-                            <span class="text-zinc-500 text-sm">Amount Remaining</span>
-                            <p>${{ number_format($selectedPlan->amount_remaining, 2) }}</p>
-                        </div>
+                    <div>
+                        <span class="text-zinc-500 text-sm">Total Amount</span>
+                        <p class="font-medium" x-text="'$' + (d.total_amount ?? '0.00')"></p>
+                    </div>
+                    <div>
+                        <span class="text-zinc-500 text-sm">Invoice Amount</span>
+                        <p x-text="'$' + (d.invoice_amount ?? '0.00')"></p>
+                    </div>
+                    <div>
+                        <span class="text-zinc-500 text-sm">Plan Fee</span>
+                        <p x-text="'$' + (d.plan_fee ?? '0.00')"></p>
                     </div>
                 </div>
-
-                <flux:separator class="my-4" />
-
-                <flux:heading size="md" class="mb-3">Payment Schedule</flux:heading>
-                <div class="max-h-64 overflow-y-auto">
-                    <flux:table>
-                        <flux:table.columns>
-                            <flux:table.column>#</flux:table.column>
-                            <flux:table.column>Amount</flux:table.column>
-                            <flux:table.column>Scheduled</flux:table.column>
-                            <flux:table.column>Status</flux:table.column>
-                        </flux:table.columns>
-                        <flux:table.rows>
-                            @foreach($selectedPlan->payments as $payment)
-                                <flux:table.row>
-                                    <flux:table.cell>{{ $payment->payment_number }}</flux:table.cell>
-                                    <flux:table.cell>${{ number_format($payment->amount, 2) }}</flux:table.cell>
-                                    <flux:table.cell>
-                                        @if($payment->scheduled_date)
-                                            {{ $payment->scheduled_date->format('M j, Y') }}
-                                        @else
-                                            -
-                                        @endif
-                                    </flux:table.cell>
-                                    <flux:table.cell>
-                                        @if($payment->status === 'completed')
-                                            <flux:badge color="green" size="sm">Completed</flux:badge>
-                                        @elseif($payment->status === 'pending')
-                                            <flux:badge color="amber" size="sm">Pending</flux:badge>
-                                        @elseif($payment->status === 'failed')
-                                            <flux:badge color="red" size="sm">Failed</flux:badge>
-                                        @else
-                                            <flux:badge size="sm">{{ ucfirst($payment->status) }}</flux:badge>
-                                        @endif
-                                    </flux:table.cell>
-                                </flux:table.row>
-                            @endforeach
-                        </flux:table.rows>
-                    </flux:table>
-                </div>
-
-                <div class="mt-6 flex justify-end gap-2">
-                    @if($selectedPlan->status === 'active' || $selectedPlan->status === 'past_due')
-                        <flux:button wire:click="confirmCancel({{ $selectedPlan->id }})" variant="danger">
-                            Cancel Plan
-                        </flux:button>
-                    @endif
-                    <flux:button wire:click="closeDetails" variant="ghost">Close</flux:button>
+                <div class="space-y-3">
+                    <div>
+                        <span class="text-zinc-500 text-sm">Monthly Payment</span>
+                        <p class="font-medium" x-text="'$' + (d.monthly_payment ?? '0.00')"></p>
+                    </div>
+                    <div>
+                        <span class="text-zinc-500 text-sm">Duration</span>
+                        <p x-text="(d.duration_months ?? '-') + ' months'"></p>
+                    </div>
+                    <div>
+                        <span class="text-zinc-500 text-sm">Amount Paid</span>
+                        <p x-text="'$' + (d.amount_paid ?? '0.00')"></p>
+                    </div>
+                    <div>
+                        <span class="text-zinc-500 text-sm">Amount Remaining</span>
+                        <p x-text="'$' + (d.amount_remaining ?? '0.00')"></p>
+                    </div>
                 </div>
             </div>
-        @endif
+
+            <flux:separator class="my-4" />
+
+            <flux:heading size="md" class="mb-3">Payment Schedule</flux:heading>
+            <div class="max-h-64 overflow-y-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-left text-zinc-500 border-b border-zinc-200 dark:border-zinc-700">
+                        <tr>
+                            <th class="pb-2 font-medium">#</th>
+                            <th class="pb-2 font-medium">Amount</th>
+                            <th class="pb-2 font-medium">Scheduled</th>
+                            <th class="pb-2 font-medium">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="(p, idx) in payments" :key="idx">
+                            <tr class="border-b border-zinc-100 dark:border-zinc-800">
+                                <td class="py-2" x-text="p.payment_number"></td>
+                                <td class="py-2" x-text="'$' + p.amount"></td>
+                                <td class="py-2">
+                                    <template x-if="p.scheduled_date">
+                                        <local-time x-bind:datetime="p.scheduled_date" format="date"></local-time>
+                                    </template>
+                                    <template x-if="!p.scheduled_date">
+                                        <span>-</span>
+                                    </template>
+                                </td>
+                                <td class="py-2">
+                                    <template x-if="p.status === 'completed'">
+                                        <span class="inline-flex items-center rounded-md bg-green-50 dark:bg-green-500/10 px-2 py-1 text-xs font-medium text-green-700 dark:text-green-400 ring-1 ring-inset ring-green-600/20">Completed</span>
+                                    </template>
+                                    <template x-if="p.status === 'pending'">
+                                        <span class="inline-flex items-center rounded-md bg-amber-50 dark:bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-400 ring-1 ring-inset ring-amber-600/20">Pending</span>
+                                    </template>
+                                    <template x-if="p.status === 'failed'">
+                                        <span class="inline-flex items-center rounded-md bg-red-50 dark:bg-red-500/10 px-2 py-1 text-xs font-medium text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-600/20">Failed</span>
+                                    </template>
+                                    <template x-if="p.status !== 'completed' && p.status !== 'pending' && p.status !== 'failed'">
+                                        <span class="inline-flex items-center rounded-md bg-zinc-50 dark:bg-zinc-500/10 px-2 py-1 text-xs font-medium text-zinc-700 dark:text-zinc-400 ring-1 ring-inset ring-zinc-600/20" x-text="p.status ? p.status.charAt(0).toUpperCase() + p.status.slice(1) : ''"></span>
+                                    </template>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mt-6 flex justify-end gap-2">
+                <template x-if="d.can_cancel">
+                    <flux:button x-on:click="$wire.confirmCancel(d.id)" variant="danger">
+                        Cancel Plan
+                    </flux:button>
+                </template>
+                <flux:modal.close>
+                    <flux:button variant="ghost">Close</flux:button>
+                </flux:modal.close>
+            </div>
+        </div>
     </flux:modal>
 
     {{-- Cancel Confirmation Modal --}}
-    <flux:modal wire:model="showCancelModal" class="max-w-md">
+    <flux:modal wire:model.self="showCancelModal" class="max-w-md" :dismissible="false" @close="resetCancelModal">
         <div class="p-6">
             <flux:heading size="lg" class="mb-2">Cancel Payment Plan</flux:heading>
             <flux:text class="text-zinc-500 mb-4">
@@ -238,9 +244,9 @@
             </flux:field>
 
             <div class="flex justify-end gap-2">
-                <flux:button wire:click="$set('showCancelModal', false)" variant="ghost">
-                    Keep Plan
-                </flux:button>
+                <flux:modal.close>
+                    <flux:button variant="ghost">Keep Plan</flux:button>
+                </flux:modal.close>
                 <flux:button wire:click="cancelPlan" variant="danger">
                     Cancel Plan
                 </flux:button>

@@ -13,7 +13,7 @@ use Livewire\WithPagination;
  *
  * Lists all payments with search and filtering.
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class Index extends Component
 {
     use WithPagination;
@@ -29,7 +29,12 @@ class Index extends Component
 
     public ?Payment $selectedPayment = null;
 
-    public bool $showDetails = false;
+    /**
+     * Pre-formatted payment details for Alpine display (bypasses modal morph issues).
+     *
+     * @var array<string, mixed>
+     */
+    public array $paymentDetails = [];
 
     /**
      * Reset pagination when filters change.
@@ -55,7 +60,8 @@ class Index extends Component
     public function viewPayment(int $id): void
     {
         $this->selectedPayment = Payment::with(['paymentPlan', 'customer'])->find($id);
-        $this->showDetails = true;
+        $this->paymentDetails = $this->formatPaymentDetails($this->selectedPayment);
+        $this->modal('payment-details')->show();
     }
 
     /**
@@ -63,8 +69,44 @@ class Index extends Component
      */
     public function closeDetails(): void
     {
-        $this->showDetails = false;
         $this->selectedPayment = null;
+        $this->paymentDetails = [];
+    }
+
+    /**
+     * Format payment data for Alpine display inside the modal.
+     *
+     * @return array<string, mixed>
+     */
+    protected function formatPaymentDetails(?Payment $payment): array
+    {
+        if (! $payment) {
+            return [];
+        }
+
+        $metadata = $payment->metadata ?? [];
+        $clientName = $metadata['client_name'] ?? $payment->customer?->name ?? null;
+        $clientId = $metadata['client_id'] ?? $payment->client_id ?? null;
+
+        return [
+            'transaction_id' => $payment->transaction_id ?? '-',
+            'client_name' => $clientName,
+            'client_id' => $clientId,
+            'client_url' => $clientId ? route('admin.clients.show', $clientId) : null,
+            'amount' => number_format($payment->amount, 2),
+            'fee' => number_format($payment->fee, 2),
+            'has_fee' => $payment->fee > 0,
+            'total_amount' => number_format($payment->total_amount, 2),
+            'payment_method' => $payment->payment_method ?? '-',
+            'payment_method_last_four' => $payment->payment_method_last_four,
+            'status' => $payment->status,
+            'failure_reason' => $payment->failure_reason,
+            'has_plan' => (bool) $payment->paymentPlan,
+            'payment_number' => $payment->payment_number,
+            'plan_duration' => $payment->paymentPlan?->duration_months,
+            'created_at' => $payment->created_at?->toIso8601String(),
+            'processed_at' => $payment->processed_at?->toIso8601String(),
+        ];
     }
 
     /**

@@ -17,7 +17,7 @@ use Livewire\WithPagination;
  *
  * Lists all recurring payments with filtering and management actions.
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class Index extends Component
 {
     use WithPagination;
@@ -35,9 +35,21 @@ class Index extends Component
 
     public string $sortDirection = 'asc';
 
-    public ?RecurringPayment $selectedPayment = null;
+    public ?int $selectedPaymentId = null;
 
-    public bool $showDetails = false;
+    /**
+     * Pre-formatted recurring payment details for Alpine display (bypasses modal morph issues).
+     *
+     * @var array<string, mixed>
+     */
+    public array $recurringDetails = [];
+
+    /**
+     * Serialized payment history rows for Alpine x-for display.
+     *
+     * @var array<int, array<string, mixed>>
+     */
+    public array $recurringHistory = [];
 
     public bool $showCancelModal = false;
 
@@ -77,8 +89,11 @@ class Index extends Component
      */
     public function viewPayment(int $id): void
     {
-        $this->selectedPayment = RecurringPayment::with('payments')->find($id);
-        $this->showDetails = true;
+        $this->selectedPaymentId = $id;
+        $payment = RecurringPayment::with('payments')->find($id);
+        $this->recurringDetails = $this->formatRecurringDetails($payment);
+        $this->recurringHistory = $this->formatRecurringHistory($payment);
+        $this->modal('recurring-payment-details')->show();
     }
 
     /**
@@ -86,8 +101,18 @@ class Index extends Component
      */
     public function closeDetails(): void
     {
-        $this->showDetails = false;
-        $this->selectedPayment = null;
+        $this->selectedPaymentId = null;
+        $this->recurringDetails = [];
+        $this->recurringHistory = [];
+    }
+
+    /**
+     * Reset cancel modal state when closed.
+     */
+    public function resetCancelModal(): void
+    {
+        $this->showCancelModal = false;
+        $this->selectedPaymentId = null;
     }
 
     /**
@@ -146,11 +171,79 @@ class Index extends Component
     }
 
     /**
+     * Format recurring payment data for Alpine display inside the modal.
+     *
+     * @return array<string, mixed>
+     */
+    protected function formatRecurringDetails(?RecurringPayment $payment): array
+    {
+        if (! $payment) {
+            return [];
+        }
+
+        // Look up client name from PracticeCS
+        $clientName = $payment->client_name;
+        if ($payment->client_id) {
+            try {
+                $result = DB::connection('sqlsrv')->selectOne(
+                    'SELECT description AS client_name FROM Client WHERE client_id = ?',
+                    [$payment->client_id]
+                );
+                if ($result) {
+                    $clientName = $result->client_name;
+                }
+            } catch (\Exception $e) {
+                // Fall back to stored client_name on the model
+            }
+        }
+
+        return [
+            'id' => $payment->id,
+            'client_id' => $payment->client_id,
+            'client_name' => $clientName ?? '-',
+            'client_url' => $payment->client_id ? route('admin.clients.show', $payment->client_id) : null,
+            'amount' => number_format($payment->amount, 2),
+            'frequency_label' => $payment->frequency_label ?? '-',
+            'payment_method_type' => $payment->payment_method_type ?? '-',
+            'payment_method_last_four' => $payment->payment_method_last_four,
+            'start_date' => $payment->start_date?->toIso8601String(),
+            'end_date' => $payment->end_date?->toIso8601String(),
+            'has_max_occurrences' => (bool) $payment->max_occurrences,
+            'payments_completed' => $payment->payments_completed ?? 0,
+            'max_occurrences' => $payment->max_occurrences,
+            'remaining_occurrences' => $payment->remaining_occurrences ?? 0,
+            'next_payment_date' => $payment->next_payment_date?->toIso8601String(),
+            'total_collected' => number_format($payment->total_collected ?? 0, 2),
+            'description' => $payment->description,
+            'status' => $payment->status,
+            'has_history' => $payment->payments && $payment->payments->count() > 0,
+        ];
+    }
+
+    /**
+     * Format payment history for Alpine x-for display.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    protected function formatRecurringHistory(?RecurringPayment $payment): array
+    {
+        if (! $payment || ! $payment->payments || $payment->payments->isEmpty()) {
+            return [];
+        }
+
+        return $payment->payments->sortByDesc('created_at')->take(10)->map(fn ($p) => [
+            'created_at' => $p->created_at?->toIso8601String(),
+            'amount' => number_format($p->amount, 2),
+            'status' => $p->status,
+        ])->values()->toArray();
+    }
+
+    /**
      * Open cancel confirmation modal.
      */
     public function confirmCancel(int $id): void
     {
-        $this->selectedPayment = RecurringPayment::find($id);
+        $this->selectedPaymentId = $id;
         $this->showCancelModal = true;
     }
 
@@ -159,8 +252,9 @@ class Index extends Component
      */
     public function cancelPayment(): void
     {
-        if ($this->selectedPayment) {
-            $payment = $this->selectedPayment;
+        $payment = $this->selectedPaymentId ? RecurringPayment::find($this->selectedPaymentId) : null;
+
+        if ($payment) {
             $clientName = $payment->client_name;
             $previousStatus = $payment->status;
             $payment->cancel();
@@ -181,7 +275,7 @@ class Index extends Component
             );
 
             $this->showCancelModal = false;
-            $this->selectedPayment = null;
+            $this->selectedPaymentId = null;
             Flux::toast('Recurring payment cancelled.');
         }
     }

@@ -57,7 +57,8 @@ trait HasPaymentPlans
     }
 
     /**
-     * Calculate down payment (30%) and payment schedule
+     * Calculate down payment (30%) and payment schedule.
+     * Includes credit card NCA fee when paying by card.
      */
     public function calculateDownPaymentAndSchedule(): void
     {
@@ -69,10 +70,18 @@ trait HasPaymentPlans
             return;
         }
 
-        // Get plan details with down payment calculation
+        // Determine the credit card fee rate based on the selected payment method
+        $creditCardFeeRate = $this->paymentMethod === 'credit_card'
+            ? (float) config('payment-fees.credit_card_rate', 0)
+            : 0.0;
+
+        // Get plan details with down payment calculation (NCA baked into total)
         $planDetails = $this->planCalculator->calculatePlanDetails(
             $this->paymentAmount,
-            $this->planDuration
+            $this->planDuration,
+            null,
+            null,
+            $creditCardFeeRate
         );
 
         // Handle invalid duration (empty plan details)
@@ -87,12 +96,16 @@ trait HasPaymentPlans
         $this->downPayment = $planDetails['down_payment'];
         $this->monthlyPayment = $planDetails['monthly_payment'];
 
-        // Calculate schedule with down payment
+        // Calculate schedule with down payment (NCA baked in)
         $this->paymentSchedule = $this->planCalculator->calculateSchedule(
             $this->paymentAmount,
             $this->planDuration,
             null,
-            false // Not split (public flow)
+            false, // Not split (public flow)
+            null,
+            null,
+            null,
+            $creditCardFeeRate
         );
     }
 

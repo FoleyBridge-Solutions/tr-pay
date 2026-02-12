@@ -56,13 +56,13 @@
                             </flux:table.cell>
                             <flux:table.cell class="text-zinc-500">
                                 @if($user->last_login_at)
-                                    {{ $user->last_login_at->diffForHumans() }}
+                                    <local-time datetime="{{ $user->last_login_at->toIso8601String() }}" format="relative"></local-time>
                                 @else
                                     Never
                                 @endif
                             </flux:table.cell>
                             <flux:table.cell class="text-zinc-500">
-                                {{ $user->created_at->format('M j, Y') }}
+                                <local-time datetime="{{ $user->created_at->toIso8601String() }}" format="date"></local-time>
                             </flux:table.cell>
                             <flux:table.cell>
                                 <div class="flex gap-1">
@@ -96,7 +96,7 @@
     </flux:card>
 
     {{-- Create User Modal --}}
-    <flux:modal wire:model="showCreateModal" class="max-w-md">
+    <flux:modal wire:model.self="showCreateModal" class="max-w-md" @close="resetCreateModal">
         <div class="p-6">
             <flux:heading size="lg" class="mb-4">Add New User</flux:heading>
 
@@ -126,9 +126,9 @@
                 </flux:field>
 
                 <div class="flex justify-end gap-2 pt-4">
-                    <flux:button type="button" wire:click="$set('showCreateModal', false)" variant="ghost">
-                        Cancel
-                    </flux:button>
+                    <flux:modal.close>
+                        <flux:button type="button" variant="ghost">Cancel</flux:button>
+                    </flux:modal.close>
                     <flux:button type="submit" variant="primary">
                         Create User
                     </flux:button>
@@ -138,7 +138,7 @@
     </flux:modal>
 
     {{-- Edit User Modal --}}
-    <flux:modal wire:model="showEditModal" class="max-w-md">
+    <flux:modal wire:model.self="showEditModal" class="max-w-md" @close="resetEditModal">
         <div class="p-6">
             <flux:heading size="lg" class="mb-4">Edit User</flux:heading>
 
@@ -169,9 +169,9 @@
                 @endif
 
                 <div class="flex justify-end gap-2 pt-4">
-                    <flux:button type="button" wire:click="$set('showEditModal', false)" variant="ghost">
-                        Cancel
-                    </flux:button>
+                    <flux:modal.close>
+                        <flux:button type="button" variant="ghost">Cancel</flux:button>
+                    </flux:modal.close>
                     <flux:button type="submit" variant="primary">
                         Save Changes
                     </flux:button>

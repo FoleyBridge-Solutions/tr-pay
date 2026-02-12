@@ -81,10 +81,10 @@
 
             <flux:sidebar.item 
                 icon="building-library" 
-                href="{{ route('admin.ach.files.index') }}" 
+                href="{{ route('admin.ach.batches.index') }}" 
                 :current="request()->routeIs('admin.ach.*')"
             >
-                ACH Files
+                ACH Batches
             </flux:sidebar.item>
 
             <flux:sidebar.item 

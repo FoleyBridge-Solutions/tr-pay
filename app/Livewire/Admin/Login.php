@@ -13,7 +13,7 @@ use Livewire\Component;
  *
  * Handles admin user authentication.
  */
-#[Layout('layouts.admin-guest')]
+#[Layout('layouts::admin-guest')]
 class Login extends Component
 {
     #[Validate('required|email')]

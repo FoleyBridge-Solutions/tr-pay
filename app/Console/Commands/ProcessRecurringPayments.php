@@ -3,9 +3,12 @@
 namespace App\Console\Commands;
 
 use App\Models\CustomerPaymentMethod;
+use App\Models\Payment;
 use App\Models\RecurringPayment;
 use App\Notifications\RecurringPaymentFailed;
+use App\Repositories\PaymentRepository;
 use App\Services\PaymentService;
+use App\Services\PracticeCsPaymentWriter;
 use App\Support\AdminNotifiable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -110,7 +113,7 @@ class ProcessRecurringPayments extends Command
                 $result = $this->processPaymentByTokenFormat($paymentService, $recurringPayment);
 
                 if ($result['success']) {
-                    $recurringPayment->recordPayment(
+                    $payment = $recurringPayment->recordPayment(
                         $recurringPayment->amount,
                         $result['transaction_id'],
                         $result['transaction_id'] ?? null
@@ -125,6 +128,11 @@ class ProcessRecurringPayments extends Command
                         'amount' => $recurringPayment->amount,
                         'transaction_id' => $result['transaction_id'],
                     ]);
+
+                    // Write to PracticeCS as unapplied payment
+                    if (config('practicecs.payment_integration.enabled')) {
+                        $this->writeToPracticeCs($recurringPayment, $payment);
+                    }
                 } else {
                     $errorMessage = $result['error'] ?? 'Unknown error';
                     $recurringPayment->recordFailedPayment($errorMessage);
@@ -294,6 +302,114 @@ class ProcessRecurringPayments extends Command
             $description,
             $customer
         );
+    }
+
+    /**
+     * Build the PracticeCS payload for a recurring payment.
+     *
+     * Recurring payments are written as unapplied payments (no invoice applications)
+     * since they have no invoice selection — the accounting team applies them
+     * manually in PracticeCS.
+     *
+     * Uses the correct ledger type for the payment method:
+     * - Credit Card: type 9 / subtype 10
+     * - ACH: type 11 / subtype 12
+     *
+     * Used for both immediate writes (cards) and deferred writes (ACH).
+     *
+     * @return array Structured payload with 'payment' key for writeDeferredPayment()
+     */
+    protected function buildPracticeCsPayload(RecurringPayment $recurringPayment, Payment $payment): array
+    {
+        $methodType = $recurringPayment->payment_method_type === 'ach' ? 'ach' : 'credit_card';
+
+        // Resolve client_KEY from client_id for PracticeCS posting
+        $paymentRepo = app(PaymentRepository::class);
+        $clientKey = $paymentRepo->resolveClientKey($recurringPayment->client_id);
+
+        if (! $clientKey) {
+            Log::error('Failed to resolve client_KEY for PracticeCS payload', [
+                'payment_id' => $payment->id,
+                'recurring_payment_id' => $recurringPayment->id,
+                'client_id' => $recurringPayment->client_id,
+            ]);
+
+            return ['payment' => null];
+        }
+
+        return [
+            'payment' => [
+                'client_KEY' => $clientKey,
+                'amount' => $payment->amount,
+                'reference' => $payment->transaction_id,
+                'comments' => "Recurring payment - {$methodType}",
+                'internal_comments' => json_encode([
+                    'source' => 'tr-pay-recurring',
+                    'transaction_id' => $payment->transaction_id,
+                    'payment_method' => $methodType,
+                    'recurring_payment_id' => $recurringPayment->id,
+                    'processed_at' => now()->toIso8601String(),
+                ]),
+                'staff_KEY' => config('practicecs.payment_integration.staff_key'),
+                'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
+                'ledger_type_KEY' => config("practicecs.payment_integration.ledger_types.{$methodType}"),
+                'subtype_KEY' => config("practicecs.payment_integration.payment_subtypes.{$methodType}"),
+                'invoices' => [],
+            ],
+        ];
+    }
+
+    /**
+     * Write a recurring payment to PracticeCS as an unapplied payment.
+     *
+     * For cards: writes immediately.
+     * For ACH: stores the payload in metadata for deferred write on settlement.
+     */
+    protected function writeToPracticeCs(RecurringPayment $recurringPayment, Payment $payment): void
+    {
+        $payload = $this->buildPracticeCsPayload($recurringPayment, $payment);
+
+        if (! $payload['payment']) {
+            return;
+        }
+
+        $isAch = $recurringPayment->payment_method_type === 'ach';
+
+        if ($isAch) {
+            // ACH: Defer PracticeCS write until settlement is confirmed
+            $metadata = $payment->metadata ?? [];
+            $metadata['practicecs_data'] = $payload;
+            $payment->update(['metadata' => $metadata]);
+
+            Log::info('ACH recurring payment: PracticeCS write deferred until settlement', [
+                'payment_id' => $payment->id,
+                'recurring_payment_id' => $recurringPayment->id,
+            ]);
+
+            $this->line('  [PracticeCS] Deferred until ACH settlement');
+        } else {
+            // Card: Write to PracticeCS immediately
+            $writer = app(PracticeCsPaymentWriter::class);
+            $result = $writer->writeDeferredPayment($payload);
+
+            if ($result['success']) {
+                Log::info('Recurring payment written to PracticeCS', [
+                    'payment_id' => $payment->id,
+                    'recurring_payment_id' => $recurringPayment->id,
+                    'ledger_entry_KEY' => $result['ledger_entry_KEY'],
+                ]);
+
+                $this->line("  [PracticeCS] Payment written (ledger_entry_KEY: {$result['ledger_entry_KEY']})");
+            } else {
+                Log::error('Failed to write recurring payment to PracticeCS', [
+                    'payment_id' => $payment->id,
+                    'recurring_payment_id' => $recurringPayment->id,
+                    'error' => $result['error'],
+                ]);
+
+                $this->warn("  [PracticeCS] Write failed: {$result['error']}");
+            }
+        }
     }
 
     /**

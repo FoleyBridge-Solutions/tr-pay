@@ -20,7 +20,7 @@ use Livewire\Component;
  * Admin page for viewing and managing saved payment methods for a client.
  * Supports creating new payment methods, setting defaults, and deletion.
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class PaymentMethods extends Component
 {
     use ValidatesPaymentMethod;
@@ -67,9 +67,14 @@ class PaymentMethods extends Component
     // Delete confirmation
     public ?int $deleteMethodId = null;
 
-    public bool $showDeleteModal = false;
-
     public ?CustomerPaymentMethod $methodToDelete = null;
+
+    /**
+     * Pre-formatted delete method details for Alpine display (bypasses modal morph issues).
+     *
+     * @var array<string, mixed>
+     */
+    public array $deleteMethodDetails = [];
 
     // Processing state
     public bool $processing = false;
@@ -343,8 +348,9 @@ class PaymentMethods extends Component
     {
         $this->deleteMethodId = $methodId;
         $this->methodToDelete = CustomerPaymentMethod::find($methodId);
-        $this->showDeleteModal = true;
+        $this->deleteMethodDetails = $this->formatDeleteMethodDetails($this->methodToDelete);
         $this->errorMessage = null;
+        $this->modal('delete-payment-method')->show();
     }
 
     /**
@@ -352,9 +358,27 @@ class PaymentMethods extends Component
      */
     public function cancelDelete(): void
     {
-        $this->showDeleteModal = false;
+        $this->modal('delete-payment-method')->close();
         $this->deleteMethodId = null;
         $this->methodToDelete = null;
+        $this->deleteMethodDetails = [];
+    }
+
+    /**
+     * Format payment method data for Alpine display in the delete confirmation modal.
+     *
+     * @return array<string, mixed>
+     */
+    protected function formatDeleteMethodDetails(?CustomerPaymentMethod $method): array
+    {
+        if (! $method) {
+            return [];
+        }
+
+        return [
+            'display_name' => $method->display_name ?? 'this payment method',
+            'is_linked_to_active_plans' => $method->isLinkedToActivePlans(),
+        ];
     }
 
     /**

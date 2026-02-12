@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Payment;
-use App\Services\Ach\AchFileService;
+use App\Services\Ach\AchBatchService;
 use Illuminate\Console\Command;
 
 class AchCreateBatchCommand extends Command
@@ -16,7 +16,7 @@ class AchCreateBatchCommand extends Command
 
     protected $description = 'Create an ACH batch from pending ACH payments';
 
-    public function handle(AchFileService $achService): int
+    public function handle(AchBatchService $achService): int
     {
         $this->info('ACH Batch Creation');
         $this->line('==================');
@@ -112,7 +112,7 @@ class AchCreateBatchCommand extends Command
 
         if ($successCount > 0) {
             $this->newLine();
-            $this->info("Run 'php artisan ach:generate-file {$batch->id}' to generate the NACHA file.");
+            $this->info('Batch created successfully.');
         }
 
         return $errorCount > 0 ? Command::FAILURE : Command::SUCCESS;

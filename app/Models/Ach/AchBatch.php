@@ -3,7 +3,6 @@
 namespace App\Models\Ach;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
@@ -13,7 +12,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *
  * @property int $id
  * @property string $batch_number
- * @property int|null $ach_file_id
  * @property string $company_name
  * @property string $company_id
  * @property string $sec_code
@@ -56,7 +54,6 @@ class AchBatch extends Model
 
     protected $fillable = [
         'batch_number',
-        'ach_file_id',
         'company_name',
         'company_id',
         'sec_code',
@@ -89,11 +86,6 @@ class AchBatch extends Model
     }
 
     // ==================== Relationships ====================
-
-    public function file(): BelongsTo
-    {
-        return $this->belongsTo(AchFile::class, 'ach_file_id');
-    }
 
     public function entries(): HasMany
     {
@@ -205,8 +197,4 @@ class AchBatch extends Model
         return $query->whereDate('effective_entry_date', $date);
     }
 
-    public function scopeNotInFile($query)
-    {
-        return $query->whereNull('ach_file_id');
-    }
 }

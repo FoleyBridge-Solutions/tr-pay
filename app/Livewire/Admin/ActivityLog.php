@@ -14,7 +14,7 @@ use Livewire\WithPagination;
  *
  * Displays admin activity audit log with filtering.
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class ActivityLog extends Component
 {
     use WithPagination;

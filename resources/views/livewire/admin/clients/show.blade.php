@@ -34,6 +34,12 @@
             </div>
         </flux:card>
     @else
+        @if(session('success'))
+            <div class="mb-6 rounded-lg border border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/30 p-4 flex items-start gap-3">
+                <flux:icon name="check-circle" class="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
+                <flux:text class="font-medium text-green-800 dark:text-green-200">{{ session('success') }}</flux:text>
+            </div>
+        @endif
         @if($notFound)
             <div class="mb-6 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 p-4 flex items-start gap-3">
                 <flux:icon name="exclamation-triangle" class="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
@@ -60,7 +66,39 @@
                         </div>
                         <div>
                             <flux:text class="text-sm text-zinc-500">Client ID</flux:text>
-                            <flux:text class="font-mono">{{ $client['client_id'] }}</flux:text>
+                            @if($editingClientId)
+                                <form wire:submit="updateClientId" class="mt-1">
+                                    <div class="flex items-center gap-2">
+                                        <flux:input
+                                            wire:model="newClientId"
+                                            size="sm"
+                                            class="font-mono max-w-48"
+                                            placeholder="Enter client ID"
+                                            autofocus
+                                        />
+                                        <flux:button type="submit" size="sm" variant="primary" icon="check">
+                                            Save
+                                        </flux:button>
+                                        <flux:button wire:click="cancelEditingClientId" size="sm" variant="ghost" icon="x-mark">
+                                            Cancel
+                                        </flux:button>
+                                    </div>
+                                    @error('newClientId')
+                                        <flux:text class="text-sm text-red-600 mt-1">{{ $message }}</flux:text>
+                                    @enderror
+                                </form>
+                            @else
+                                <div class="flex items-center gap-2">
+                                    <flux:text class="font-mono">{{ $client['client_id'] }}</flux:text>
+                                    <flux:button
+                                        wire:click="startEditingClientId"
+                                        size="xs"
+                                        variant="ghost"
+                                        icon="pencil"
+                                        title="Edit Client ID"
+                                    />
+                                </div>
+                            @endif
                         </div>
                         @if($client['individual_first_name'] || $client['individual_last_name'])
                             <div>
@@ -217,8 +255,9 @@
                     <div class="p-4 border-b border-zinc-200 dark:border-zinc-700">
                         <flux:heading size="md">Recurring Payments ({{ $recurringPayments->count() }})</flux:heading>
                     </div>
-                    @if($recurringPayments->count() > 0)
-                        <flux:table>
+                    <div wire:replace.self>
+                        @if($recurringPayments->count() > 0)
+                            <flux:table>
                             <flux:table.columns>
                                 <flux:table.column>Amount</flux:table.column>
                                 <flux:table.column>Frequency</flux:table.column>
@@ -233,7 +272,7 @@
                                     @php
                                         $methodStatus = $this->getRecurringPaymentMethodStatus($recurring);
                                     @endphp
-                                    <flux:table.row>
+                                    <flux:table.row :key="'recurring-'.$recurring->id.'-'.$recurring->status.'-'.($recurring->payment_method_token ? '1' : '0')">
                                         <flux:table.cell>
                                             <span class="font-medium">${{ number_format($recurring->amount, 2) }}</span>
                                         </flux:table.cell>
@@ -270,13 +309,33 @@
                                                 </div>
                                                 <flux:badge color="amber" size="sm" class="mt-1">No Saved Method</flux:badge>
                                             @elseif($methodStatus['status'] === 'pending')
-                                                <span class="text-sm text-zinc-400 italic">Not assigned</span>
+                                                @if($paymentMethods->count() > 0)
+                                                    <flux:button
+                                                        wire:click="openAssignMethodModal({{ $recurring->id }})"
+                                                        size="xs"
+                                                        variant="ghost"
+                                                        icon="link"
+                                                        class="text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                                                    >
+                                                        Assign Method
+                                                    </flux:button>
+                                                @else
+                                                    <flux:button
+                                                        href="{{ route('admin.clients.payment-methods', ['client' => $clientId]) }}"
+                                                        size="xs"
+                                                        variant="ghost"
+                                                        icon="plus"
+                                                        class="text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                                                    >
+                                                        Add Method
+                                                    </flux:button>
+                                                @endif
                                             @endif
                                         </flux:table.cell>
                                         <flux:table.cell>
                                             @if($recurring->next_payment_date)
                                                 <span class="{{ $recurring->next_payment_date->isPast() ? 'text-amber-600' : '' }}">
-                                                    {{ $recurring->next_payment_date->format('M j, Y') }}
+                                                    <local-time datetime="{{ $recurring->next_payment_date->toIso8601String() }}" format="date"></local-time>
                                                 </span>
                                             @else
                                                 <span class="text-zinc-400">-</span>
@@ -324,6 +383,7 @@
                             <flux:text>No recurring payments</flux:text>
                         </div>
                     @endif
+                    </div>
                 </flux:card>
 
                 {{-- Payment Plans --}}
@@ -354,7 +414,7 @@
                                         </flux:table.cell>
                                         <flux:table.cell>
                                             @if($plan->next_payment_date)
-                                                {{ $plan->next_payment_date->format('M j, Y') }}
+                                                <local-time datetime="{{ $plan->next_payment_date->toIso8601String() }}" format="date"></local-time>
                                             @else
                                                 <span class="text-zinc-400">-</span>
                                             @endif
@@ -402,7 +462,7 @@
                                 @foreach($payments as $payment)
                                     <flux:table.row>
                                         <flux:table.cell>
-                                            {{ $payment->created_at->format('M j, Y') }}
+                                            <local-time datetime="{{ $payment->created_at->toIso8601String() }}" format="date"></local-time>
                                         </flux:table.cell>
                                         <flux:table.cell>
                                             <span class="font-medium">${{ number_format($payment->amount, 2) }}</span>
@@ -448,4 +508,83 @@
             </div>
         </div>
     @endif
+
+    {{-- Assign Payment Method Modal --}}
+    <flux:modal name="assign-payment-method" class="w-full max-w-lg">
+        <div x-data="{ get d() { return $wire.assignModalDetails } }">
+            <template x-if="d && d.recurring_id">
+                <div class="space-y-6">
+                    {{-- Header --}}
+                    <div>
+                        <flux:heading size="lg">Assign Payment Method</flux:heading>
+                        <flux:text class="text-zinc-500 mt-1">
+                            Select a saved payment method for this
+                            <span x-text="d.recurring_frequency" class="font-medium"></span>
+                            recurring payment of
+                            <span class="font-medium">$<span x-text="d.recurring_amount"></span></span>.
+                        </flux:text>
+                        <template x-if="d.recurring_description">
+                            <flux:text class="text-zinc-400 text-sm mt-1" x-text="d.recurring_description"></flux:text>
+                        </template>
+                    </div>
+
+                    {{-- Payment Methods List --}}
+                    <template x-if="d.methods && d.methods.length > 0">
+                        <div class="space-y-2">
+                            <template x-for="method in d.methods" :key="method.id">
+                                <button
+                                    type="button"
+                                    x-on:click="$wire.assignPaymentMethod(method.id)"
+                                    class="w-full flex items-center justify-between p-3 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors text-left"
+                                >
+                                    <div class="flex items-center gap-3 min-w-0">
+                                        {{-- Icon --}}
+                                        <template x-if="method.type === 'card'">
+                                            <flux:icon name="credit-card" class="w-5 h-5 text-zinc-400 flex-shrink-0" />
+                                        </template>
+                                        <template x-if="method.type === 'ach'">
+                                            <flux:icon name="building-library" class="w-5 h-5 text-zinc-400 flex-shrink-0" />
+                                        </template>
+
+                                        {{-- Details --}}
+                                        <div class="min-w-0">
+                                            <div class="flex items-center gap-2">
+                                                <span class="font-medium text-sm truncate" x-text="method.display_name"></span>
+                                                <template x-if="method.is_default">
+                                                    <span class="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 px-1.5 py-0.5 rounded flex-shrink-0">Default</span>
+                                                </template>
+                                            </div>
+                                            <template x-if="method.exp_display">
+                                                <div class="flex items-center gap-1 mt-0.5">
+                                                    <span class="text-xs text-zinc-400">Exp: <span x-text="method.exp_display"></span></span>
+                                                    <template x-if="method.is_expiring_soon">
+                                                        <span class="text-xs text-amber-500">(expiring soon)</span>
+                                                    </template>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+
+                                    {{-- Arrow --}}
+                                    <flux:icon name="chevron-right" class="w-4 h-4 text-zinc-400 flex-shrink-0" />
+                                </button>
+                            </template>
+                        </div>
+                    </template>
+
+                    {{-- No methods fallback (shouldn't happen since we check before opening) --}}
+                    <template x-if="!d.methods || d.methods.length === 0">
+                        <div class="text-center py-4">
+                            <flux:text class="text-zinc-500">No payment methods available.</flux:text>
+                        </div>
+                    </template>
+
+                    {{-- Footer --}}
+                    <div class="flex justify-end">
+                        <flux:button wire:click="closeAssignModal" variant="ghost">Cancel</flux:button>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </flux:modal>
 </div>

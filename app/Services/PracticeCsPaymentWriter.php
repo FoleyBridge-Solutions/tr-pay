@@ -566,4 +566,299 @@ class PracticeCsPaymentWriter
             substr($hash, 20, 12)
         );
     }
+
+    /**
+     * Write a deferred payment to PracticeCS from a stored payload.
+     *
+     * This method handles both simple payments and payments with client group
+     * distribution (credit/debit memos). It is used for:
+     * - Immediate card payment writes (called from writeToPracticeCs at payment time)
+     * - Deferred ACH payment writes (called from CheckAchPaymentStatus on settlement)
+     *
+     * @param  array  $deferredData  Structured payload with 'payment' key and optional 'group_distribution'
+     * @return array ['success' => bool, 'ledger_entry_KEY' => int|null, 'error' => string|null]
+     */
+    public function writeDeferredPayment(array $deferredData): array
+    {
+        $paymentData = $deferredData['payment'] ?? null;
+
+        if (! $paymentData) {
+            return [
+                'success' => false,
+                'error' => 'No payment data in deferred payload',
+            ];
+        }
+
+        // Step 1: Write the primary entry (payment or credit memo)
+        $type = $deferredData['type'] ?? 'payment';
+
+        if ($type === 'credit_memo') {
+            $result = $this->writeMemo($paymentData, 'credit');
+        } else {
+            $result = $this->writePayment($paymentData);
+        }
+
+        if (! $result['success']) {
+            return $result;
+        }
+
+        $paymentLedgerKey = $result['ledger_entry_KEY'];
+
+        // Step 2: Handle group distribution if present
+        $groupDistribution = $deferredData['group_distribution'] ?? [];
+
+        if (! empty($groupDistribution)) {
+            try {
+                $this->writeGroupDistribution($groupDistribution, $paymentLedgerKey);
+            } catch (\Exception $e) {
+                Log::error('PracticeCS: Group distribution failed (primary payment was written)', [
+                    'payment_ledger_KEY' => $paymentLedgerKey,
+                    'error' => $e->getMessage(),
+                ]);
+
+                // Return success for the primary payment but log the memo failure
+                return [
+                    'success' => true,
+                    'ledger_entry_KEY' => $paymentLedgerKey,
+                    'entry_number' => $result['entry_number'] ?? null,
+                    'warning' => 'Group distribution memos failed: '.$e->getMessage(),
+                ];
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Write client group distribution memos for a payment.
+     *
+     * Creates credit memos on other clients and debit memos on the primary client,
+     * with invoice applications and ledger entry linkage.
+     *
+     * @param  array  $groupDistribution  Array of group distribution entries from buildPracticeCsPayload()
+     * @param  int  $paymentLedgerKey  The ledger_entry_KEY of the primary payment
+     */
+    protected function writeGroupDistribution(array $groupDistribution, int $paymentLedgerKey): void
+    {
+        $connection = config('practicecs.payment_integration.connection', 'sqlsrv');
+
+        foreach ($groupDistribution as $entry) {
+            // Build the credit memo data with internal_comments as JSON string
+            $creditMemo = $entry['credit_memo'];
+            $creditMemoData = $creditMemo;
+            $creditMemoData['reference'] = 'MEMO_'.now()->format('Ymd').'_'.($creditMemo['internal_comments_data']['transaction_id'] ?? '');
+            $creditMemoData['internal_comments'] = json_encode(array_merge(
+                $creditMemo['internal_comments_data'],
+                [
+                    'original_payment_key' => $paymentLedgerKey,
+                    'processed_at' => now()->toIso8601String(),
+                ]
+            ));
+            unset($creditMemoData['internal_comments_data']);
+
+            $creditResult = $this->writeMemo($creditMemoData, 'credit');
+
+            if (! $creditResult['success']) {
+                throw new \Exception("Failed to create credit memo for client {$creditMemo['client_KEY']}: ".($creditResult['error'] ?? 'Unknown error'));
+            }
+
+            $creditMemoLedgerKey = $creditResult['ledger_entry_KEY'];
+
+            Log::info('PracticeCS: Credit memo created for group distribution', [
+                'client_KEY' => $creditMemo['client_KEY'],
+                'ledger_entry_KEY' => $creditMemoLedgerKey,
+                'amount' => $entry['amount'],
+            ]);
+
+            // Apply invoices to the credit memo
+            $invoicesToApply = $entry['invoices'] ?? [];
+            if (! empty($invoicesToApply)) {
+                $staffKey = $creditMemo['staff_KEY'];
+
+                DB::connection($connection)->transaction(function () use ($connection, $creditMemoLedgerKey, $invoicesToApply, $staffKey) {
+                    $this->applyPaymentToInvoices($connection, $creditMemoLedgerKey, $invoicesToApply, $staffKey);
+                });
+
+                Log::info('PracticeCS: Credit memo applied to invoices', [
+                    'credit_memo_KEY' => $creditMemoLedgerKey,
+                    'invoices_count' => count($invoicesToApply),
+                ]);
+            }
+
+            // Build the debit memo data
+            $debitMemo = $entry['debit_memo'];
+            $debitMemoData = $debitMemo;
+            $debitMemoData['reference'] = $creditMemoData['reference']; // Same memo reference
+            $debitMemoData['internal_comments'] = json_encode(array_merge(
+                $debitMemo['internal_comments_data'],
+                [
+                    'original_payment_key' => $paymentLedgerKey,
+                    'processed_at' => now()->toIso8601String(),
+                ]
+            ));
+            unset($debitMemoData['internal_comments_data']);
+
+            $debitResult = $this->writeMemo($debitMemoData, 'debit');
+
+            if (! $debitResult['success']) {
+                throw new \Exception('Failed to create debit memo: '.($debitResult['error'] ?? 'Unknown error'));
+            }
+
+            $debitMemoLedgerKey = $debitResult['ledger_entry_KEY'];
+
+            Log::info('PracticeCS: Debit memo created for group distribution', [
+                'client_KEY' => $debitMemo['client_KEY'],
+                'ledger_entry_KEY' => $debitMemoLedgerKey,
+                'amount' => $entry['amount'],
+            ]);
+
+            // Apply debit memo to the payment
+            $staffKey = $debitMemo['staff_KEY'];
+
+            DB::connection($connection)->insert('
+                INSERT INTO Ledger_Entry_Application (
+                    update__staff_KEY,
+                    update_date_utc,
+                    from__ledger_entry_KEY,
+                    to__ledger_entry_KEY,
+                    applied_amount,
+                    create_date_utc
+                )
+                VALUES (?, GETUTCDATE(), ?, ?, ?, GETUTCDATE())
+            ', [
+                $staffKey,
+                $debitMemoLedgerKey,  // FROM = Debit Memo
+                $paymentLedgerKey,     // TO = Payment
+                $entry['amount'],
+            ]);
+
+            Log::info('PracticeCS: Debit memo applied to payment', [
+                'debit_memo_KEY' => $debitMemoLedgerKey,
+                'payment_KEY' => $paymentLedgerKey,
+                'amount' => $entry['amount'],
+            ]);
+        }
+    }
+
+    /**
+     * Allocate a payment amount sequentially across invoices.
+     *
+     * Fills each invoice in order, accounting for amounts already applied
+     * (settled) and pending (ACH awaiting settlement). Returns the invoice
+     * allocations and the incremental amounts to add to pending/applied tracking.
+     *
+     * @param  array  $invoices  Invoice data with ledger_entry_KEY and open_amount
+     * @param  float  $amount  Payment amount to allocate
+     * @param  array  $applied  Settled amounts by ledger_entry_KEY
+     * @param  array  $pending  Pending ACH amounts by ledger_entry_KEY
+     * @return array{allocations: array, increments: array} allocations for PracticeCS payload, increments to add to tracking
+     */
+    public static function allocateToInvoices(array $invoices, float $amount, array $applied, array $pending): array
+    {
+        $allocations = [];
+        $increments = [];
+        $remaining = $amount;
+
+        foreach ($invoices as $invoice) {
+            if ($remaining <= 0.01) {
+                break;
+            }
+
+            $key = $invoice['ledger_entry_KEY'] ?? null;
+            if (! $key) {
+                continue;
+            }
+
+            $openAmount = (float) ($invoice['open_amount'] ?? 0);
+            $alreadyApplied = (float) ($applied[$key] ?? 0);
+            $alreadyPending = (float) ($pending[$key] ?? 0);
+            $invoiceRemaining = $openAmount - $alreadyApplied - $alreadyPending;
+
+            if ($invoiceRemaining <= 0.01) {
+                continue;
+            }
+
+            $applyAmount = round(min($remaining, $invoiceRemaining), 2);
+            $allocations[] = [
+                'ledger_entry_KEY' => $key,
+                'amount' => $applyAmount,
+            ];
+            $increments[$key] = $applyAmount;
+            $remaining = round($remaining - $applyAmount, 2);
+        }
+
+        return [
+            'allocations' => $allocations,
+            'increments' => $increments,
+        ];
+    }
+
+    /**
+     * Update payment plan metadata tracking after a PracticeCS write or deferral.
+     *
+     * @param  \App\Models\PaymentPlan  $paymentPlan  The payment plan to update
+     * @param  array  $increments  Amounts to add, keyed by ledger_entry_KEY
+     * @param  string  $trackingKey  'practicecs_applied' or 'practicecs_pending'
+     */
+    public static function updatePlanTracking(\App\Models\PaymentPlan $paymentPlan, array $increments, string $trackingKey): void
+    {
+        $metadata = $paymentPlan->metadata ?? [];
+        $tracking = $metadata[$trackingKey] ?? [];
+
+        foreach ($increments as $ledgerKey => $amount) {
+            $tracking[$ledgerKey] = round((float) ($tracking[$ledgerKey] ?? 0) + $amount, 2);
+        }
+
+        $metadata[$trackingKey] = $tracking;
+        $paymentPlan->metadata = $metadata;
+        $paymentPlan->save();
+    }
+
+    /**
+     * Move amounts from practicecs_pending to practicecs_applied in plan metadata.
+     *
+     * Called when an ACH payment settles and is written to PracticeCS.
+     *
+     * @param  \App\Models\PaymentPlan  $paymentPlan  The payment plan
+     * @param  array  $increments  Amounts to move, keyed by ledger_entry_KEY
+     */
+    public static function settlePlanTracking(\App\Models\PaymentPlan $paymentPlan, array $increments): void
+    {
+        $metadata = $paymentPlan->metadata ?? [];
+        $applied = $metadata['practicecs_applied'] ?? [];
+        $pending = $metadata['practicecs_pending'] ?? [];
+
+        foreach ($increments as $ledgerKey => $amount) {
+            $applied[$ledgerKey] = round((float) ($applied[$ledgerKey] ?? 0) + $amount, 2);
+            $pending[$ledgerKey] = round(max(0, (float) ($pending[$ledgerKey] ?? 0) - $amount), 2);
+        }
+
+        $metadata['practicecs_applied'] = $applied;
+        $metadata['practicecs_pending'] = $pending;
+        $paymentPlan->metadata = $metadata;
+        $paymentPlan->save();
+    }
+
+    /**
+     * Remove amounts from practicecs_pending in plan metadata.
+     *
+     * Called when an ACH payment is returned/rejected — the allocation
+     * is freed so future payments can fill those invoices.
+     *
+     * @param  \App\Models\PaymentPlan  $paymentPlan  The payment plan
+     * @param  array  $increments  Amounts to remove, keyed by ledger_entry_KEY
+     */
+    public static function revertPlanTracking(\App\Models\PaymentPlan $paymentPlan, array $increments): void
+    {
+        $metadata = $paymentPlan->metadata ?? [];
+        $pending = $metadata['practicecs_pending'] ?? [];
+
+        foreach ($increments as $ledgerKey => $amount) {
+            $pending[$ledgerKey] = round(max(0, (float) ($pending[$ledgerKey] ?? 0) - $amount), 2);
+        }
+
+        $metadata['practicecs_pending'] = $pending;
+        $paymentPlan->metadata = $metadata;
+        $paymentPlan->save();
+    }
 }

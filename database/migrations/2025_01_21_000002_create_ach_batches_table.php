@@ -14,7 +14,6 @@ return new class extends Migration
         Schema::create('ach_batches', function (Blueprint $table) {
             $table->id();
             $table->string('batch_number', 7)->unique(); // 7-digit batch number
-            $table->foreignId('ach_file_id')->nullable()->constrained('ach_files')->nullOnDelete();
 
             // Batch header info
             $table->string('company_name', 16);

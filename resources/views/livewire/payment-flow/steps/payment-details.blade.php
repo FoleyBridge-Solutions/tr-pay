@@ -42,7 +42,7 @@
 
     <form wire:submit.prevent="confirmPayment" class="space-y-6">
         @if($paymentMethod === 'credit_card')
-            <div class="space-y-4">
+            <div wire:key="payment-fields-card" class="space-y-4">
                 <flux:field>
                     <flux:label>Card Number</flux:label>
                     <flux:input wire:model.live="cardNumber" placeholder="4111 1111 1111 1111" maxlength="19" required />
@@ -67,7 +67,7 @@
                 </div>
             </div>
         @elseif($paymentMethod === 'ach')
-            <div class="space-y-4">
+            <div wire:key="payment-fields-ach" class="space-y-4">
                 <flux:field>
                     <flux:label>Bank Name</flux:label>
                     <flux:input wire:model="bankName" placeholder="First National Bank" required />

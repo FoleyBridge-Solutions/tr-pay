@@ -13,7 +13,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *
  * @property int $id
  * @property int|null $ach_entry_id
- * @property int|null $ach_file_id
  * @property string $trace_number
  * @property string|null $original_trace_number
  * @property \Carbon\Carbon $return_date
@@ -94,7 +93,6 @@ class AchReturn extends Model
 
     protected $fillable = [
         'ach_entry_id',
-        'ach_file_id',
         'trace_number',
         'original_trace_number',
         'return_date',
@@ -129,11 +127,6 @@ class AchReturn extends Model
     public function entry(): BelongsTo
     {
         return $this->belongsTo(AchEntry::class, 'ach_entry_id');
-    }
-
-    public function file(): BelongsTo
-    {
-        return $this->belongsTo(AchFile::class, 'ach_file_id');
     }
 
     public function reviewer(): BelongsTo

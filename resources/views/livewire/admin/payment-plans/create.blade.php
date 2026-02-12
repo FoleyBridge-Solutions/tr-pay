@@ -8,7 +8,7 @@
     @if($currentStep <= 5)
         <div class="mb-8">
             <div class="flex items-center justify-between max-w-3xl">
-                @foreach(['Select Client', 'Select Invoices', 'Configure Plan', 'Payment Method', 'Review'] as $index => $stepName)
+                @foreach(['Select Client', 'Select Invoices', 'Payment Method', 'Configure Plan', 'Review'] as $index => $stepName)
                     @php $stepNum = $index + 1; @endphp
                     <div class="flex items-center {{ $index < 4 ? 'flex-1' : '' }}">
                         <div class="flex items-center">
@@ -146,15 +146,16 @@
                             </flux:table.columns>
                             <flux:table.rows>
                                 @foreach($availableInvoices as $invoice)
+                                    @php $invoiceKey = (string) $invoice['ledger_entry_KEY']; @endphp
                                     <flux:table.row
-                                        wire:key="invoice-{{ $invoice['ledger_entry_KEY'] }}"
-                                        wire:click="toggleInvoice('{{ $invoice['ledger_entry_KEY'] }}')"
+                                        wire:key="invoice-{{ $invoiceKey }}"
+                                        wire:click="toggleInvoice('{{ $invoiceKey }}')"
                                         class="cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800"
                                     >
-                                        <flux:table.cell>
+                                        <flux:table.cell wire:click.stop>
                                             <flux:checkbox
-                                                :checked="in_array((string)$invoice['ledger_entry_KEY'], $selectedInvoices)"
-                                                wire:click.stop="toggleInvoice('{{ $invoice['ledger_entry_KEY'] }}')"
+                                                :data-checked="in_array($invoiceKey, $selectedInvoices, true) ? '' : null"
+                                                wire:click="toggleInvoice('{{ $invoiceKey }}')"
                                             />
                                         </flux:table.cell>
                                         <flux:table.cell class="font-mono">{{ $invoice['invoice_number'] }}</flux:table.cell>
@@ -190,8 +191,99 @@
         </flux:card>
     @endif
 
-    {{-- Step 3: Configure Plan --}}
+    {{-- Step 3: Payment Method --}}
     @if($currentStep === 3)
+        <flux:card class="max-w-2xl">
+            <div class="p-6">
+                <flux:heading size="lg" class="mb-6">Payment Method</flux:heading>
+
+                {{-- Payment Type Tabs --}}
+                <div class="flex gap-2 mb-6">
+                    <flux:button
+                        wire:click="$set('paymentMethodType', 'card')"
+                        :variant="$paymentMethodType === 'card' ? 'primary' : 'ghost'"
+                    >
+                        Credit Card
+                    </flux:button>
+                    <flux:button
+                        wire:click="$set('paymentMethodType', 'ach')"
+                        :variant="$paymentMethodType === 'ach' ? 'primary' : 'ghost'"
+                    >
+                        Bank Account (ACH)
+                    </flux:button>
+                </div>
+
+                {{-- Credit Card NCA Notice --}}
+                @if($paymentMethodType === 'card')
+                    <flux:callout variant="warning" icon="exclamation-triangle" class="mb-6">
+                        <flux:callout.heading>Non-Cash Adjustment</flux:callout.heading>
+                        <flux:callout.text>
+                            A {{ config('payment-fees.credit_card_rate') * 100 }}% credit card processing fee will be applied to this payment plan.
+                            This fee is included in the total amount and spread across all payments.
+                        </flux:callout.text>
+                    </flux:callout>
+                @endif
+
+                @if($paymentMethodType === 'card')
+                    <div wire:key="payment-fields-card" class="space-y-4">
+                        <flux:field>
+                            <flux:label>Card Number</flux:label>
+                            <flux:input wire:model="cardNumber" placeholder="1234 5678 9012 3456" />
+                        </flux:field>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <flux:field>
+                                <flux:label>Expiry Date</flux:label>
+                                <flux:input wire:model="cardExpiry" placeholder="MM/YY" />
+                            </flux:field>
+                            <flux:field>
+                                <flux:label>CVV</flux:label>
+                                <flux:input wire:model="cardCvv" type="password" placeholder="123" />
+                            </flux:field>
+                        </div>
+
+                        <flux:field>
+                            <flux:label>Name on Card</flux:label>
+                            <flux:input wire:model="cardName" placeholder="John Doe" />
+                        </flux:field>
+                    </div>
+                @else
+                    <div wire:key="payment-fields-ach" class="space-y-4">
+                        <flux:field>
+                            <flux:label>Account Holder Name</flux:label>
+                            <flux:input wire:model="accountName" placeholder="John Doe" />
+                        </flux:field>
+
+                        <flux:field>
+                            <flux:label>Routing Number</flux:label>
+                            <flux:input wire:model="routingNumber" placeholder="123456789" />
+                        </flux:field>
+
+                        <flux:field>
+                            <flux:label>Account Number</flux:label>
+                            <flux:input wire:model="accountNumber" placeholder="1234567890" />
+                        </flux:field>
+
+                        <flux:field>
+                            <flux:label>Account Type</flux:label>
+                            <flux:select wire:model="accountType">
+                                <option value="checking">Checking</option>
+                                <option value="savings">Savings</option>
+                            </flux:select>
+                        </flux:field>
+                    </div>
+                @endif
+
+                <div class="flex justify-between mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-700">
+                    <flux:button wire:click="previousStep" variant="ghost">Back</flux:button>
+                    <flux:button wire:click="nextStep" variant="primary">Continue</flux:button>
+                </div>
+            </div>
+        </flux:card>
+    @endif
+
+    {{-- Step 4: Configure Plan --}}
+    @if($currentStep === 4)
         <flux:card class="max-w-2xl">
             <div class="p-6">
                 <flux:heading size="lg" class="mb-6">Configure Payment Plan</flux:heading>
@@ -200,11 +292,83 @@
                 <flux:field class="mb-6">
                     <flux:label>Plan Duration</flux:label>
                     <flux:select wire:model.live="planDuration">
-                        <option value="3">3 Months - $150 Fee</option>
-                        <option value="6">6 Months - $300 Fee</option>
-                        <option value="9">9 Months - $450 Fee</option>
+                        <option value="3">3 Months{{ $waivePlanFee ? '' : ' - $150 Fee' }}</option>
+                        <option value="6">6 Months{{ $waivePlanFee ? '' : ' - $300 Fee' }}</option>
+                        <option value="9">9 Months{{ $waivePlanFee ? '' : ' - $450 Fee' }}</option>
                     </flux:select>
                 </flux:field>
+
+                {{-- Admin Override Options --}}
+                <div class="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg space-y-4">
+                    <div class="text-sm font-medium text-blue-800 dark:text-blue-300">Admin Options</div>
+
+                    {{-- Waive Plan Fee --}}
+                    <div class="flex items-start gap-3">
+                        <flux:checkbox wire:model.live="waivePlanFee" id="waivePlanFee" />
+                        <div>
+                            <label for="waivePlanFee" class="font-medium text-zinc-900 dark:text-zinc-100 cursor-pointer">
+                                Waive plan fee
+                            </label>
+                            <p class="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
+                                Set the plan fee to $0 instead of the standard ${{ number_format(config('payment-fees.payment_plan_fees')[$planDuration] ?? 0, 0) }} fee.
+                            </p>
+                        </div>
+                    </div>
+
+                    {{-- Custom Down Payment --}}
+                    <div class="flex items-start gap-3">
+                        <flux:checkbox wire:model.live="useCustomDownPayment" id="useCustomDownPayment" />
+                        <div class="flex-1">
+                            <label for="useCustomDownPayment" class="font-medium text-zinc-900 dark:text-zinc-100 cursor-pointer">
+                                Set custom down payment amount
+                            </label>
+                            <p class="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
+                                Override the standard 30% down payment with a custom dollar amount.
+                            </p>
+
+                            @if($useCustomDownPayment)
+                                <div class="mt-3 max-w-xs">
+                                    <flux:input
+                                        wire:model.live.debounce.300ms="customDownPaymentAmount"
+                                        type="number"
+                                        min="0"
+                                        max="{{ $totalAmount }}"
+                                        step="0.01"
+                                        placeholder="0.00"
+                                        icon="currency-dollar"
+                                    />
+                                    <p class="text-xs text-zinc-500 mt-1">
+                                        Enter an amount between $0.00 and ${{ number_format($totalAmount, 2) }}
+                                    </p>
+                                </div>
+                            @endif
+                        </div>
+                    </div>
+
+                    {{-- Custom Recurring Payment Day --}}
+                    <div class="flex items-start gap-3">
+                        <div class="flex-1">
+                            <label for="recurringDay" class="font-medium text-zinc-900 dark:text-zinc-100">
+                                Recurring payment day of month
+                            </label>
+                            <p class="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
+                                Set a specific day (1-31) for monthly payments. Leave blank to use today's date each month.
+                                For shorter months, payments will fall on the last day of the month.
+                            </p>
+                            <div class="mt-3 max-w-xs">
+                                <flux:input
+                                    wire:model.live.debounce.300ms="recurringDay"
+                                    type="number"
+                                    min="1"
+                                    max="31"
+                                    step="1"
+                                    placeholder="e.g. 15"
+                                    icon="calendar-days"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 {{-- Summary --}}
                 <div class="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-4 space-y-3">
@@ -214,14 +378,33 @@
                     </div>
                     <div class="flex justify-between">
                         <span class="text-zinc-600 dark:text-zinc-400">Plan Fee</span>
-                        <span>${{ number_format($planFee, 2) }}</span>
+                        <span class="{{ $waivePlanFee ? 'text-green-600 dark:text-green-400' : '' }}">
+                            @if($waivePlanFee)
+                                <span class="line-through text-zinc-400 mr-1">${{ number_format(config('payment-fees.payment_plan_fees')[$planDuration] ?? 0, 2) }}</span>
+                                $0.00 (Waived)
+                            @else
+                                ${{ number_format($planFee, 2) }}
+                            @endif
+                        </span>
                     </div>
+                    @if($creditCardFee > 0)
+                    <div class="flex justify-between text-amber-700 dark:text-amber-400">
+                        <span>Credit Card Fee ({{ config('payment-fees.credit_card_rate') * 100 }}%)</span>
+                        <span>${{ number_format($creditCardFee, 2) }}</span>
+                    </div>
+                    @endif
                     <div class="border-t border-zinc-200 dark:border-zinc-700 pt-3 flex justify-between font-medium">
                         <span>Total Amount</span>
                         <span>${{ number_format($totalAmount, 2) }}</span>
                     </div>
                     <div class="border-t border-zinc-200 dark:border-zinc-700 pt-3 flex justify-between font-bold text-green-600 dark:text-green-400">
-                        <span>Down Payment (30%) - Due Today</span>
+                        <span>
+                            @if($useCustomDownPayment)
+                                Down Payment (Custom){{ $downPayment > 0 ? ' - Due Today' : '' }}
+                            @else
+                                Down Payment (30%) - Due Today
+                            @endif
+                        </span>
                         <span>${{ number_format($downPayment, 2) }}</span>
                     </div>
                     <div class="flex justify-between text-lg font-bold text-blue-600">
@@ -230,7 +413,8 @@
                     </div>
                 </div>
 
-                {{-- Split Down Payment Option (Admin Only) --}}
+                {{-- Split Down Payment Option (Admin Only) - Hidden when using custom down payment --}}
+                @if(!$useCustomDownPayment && $downPayment > 0)
                 <div class="mt-6 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
                     <div class="flex items-start gap-3">
                         <flux:checkbox wire:model.live="splitDownPayment" id="splitDownPayment" />
@@ -260,9 +444,10 @@
                         </div>
                     @endif
                 </div>
+                @endif
 
                 {{-- Payment Schedule Preview --}}
-                <div class="mt-6">
+                <div class="mt-6" wire:replace>
                     <flux:heading size="md" class="mb-3">Payment Schedule</flux:heading>
                     <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
                         <flux:table>
@@ -298,86 +483,6 @@
         </flux:card>
     @endif
 
-    {{-- Step 4: Payment Method --}}
-    @if($currentStep === 4)
-        <flux:card class="max-w-2xl">
-            <div class="p-6">
-                <flux:heading size="lg" class="mb-6">Payment Method</flux:heading>
-
-                {{-- Payment Type Tabs --}}
-                <div class="flex gap-2 mb-6">
-                    <flux:button
-                        wire:click="$set('paymentMethodType', 'card')"
-                        :variant="$paymentMethodType === 'card' ? 'primary' : 'ghost'"
-                    >
-                        Credit Card
-                    </flux:button>
-                    <flux:button
-                        wire:click="$set('paymentMethodType', 'ach')"
-                        :variant="$paymentMethodType === 'ach' ? 'primary' : 'ghost'"
-                    >
-                        Bank Account (ACH)
-                    </flux:button>
-                </div>
-
-                @if($paymentMethodType === 'card')
-                    <div class="space-y-4">
-                        <flux:field>
-                            <flux:label>Card Number</flux:label>
-                            <flux:input wire:model="cardNumber" placeholder="1234 5678 9012 3456" />
-                        </flux:field>
-
-                        <div class="grid grid-cols-2 gap-4">
-                            <flux:field>
-                                <flux:label>Expiry Date</flux:label>
-                                <flux:input wire:model="cardExpiry" placeholder="MM/YY" />
-                            </flux:field>
-                            <flux:field>
-                                <flux:label>CVV</flux:label>
-                                <flux:input wire:model="cardCvv" type="password" placeholder="123" />
-                            </flux:field>
-                        </div>
-
-                        <flux:field>
-                            <flux:label>Name on Card</flux:label>
-                            <flux:input wire:model="cardName" placeholder="John Doe" />
-                        </flux:field>
-                    </div>
-                @else
-                    <div class="space-y-4">
-                        <flux:field>
-                            <flux:label>Account Holder Name</flux:label>
-                            <flux:input wire:model="accountName" placeholder="John Doe" />
-                        </flux:field>
-
-                        <flux:field>
-                            <flux:label>Routing Number</flux:label>
-                            <flux:input wire:model="routingNumber" placeholder="123456789" />
-                        </flux:field>
-
-                        <flux:field>
-                            <flux:label>Account Number</flux:label>
-                            <flux:input wire:model="accountNumber" placeholder="1234567890" />
-                        </flux:field>
-
-                        <flux:field>
-                            <flux:label>Account Type</flux:label>
-                            <flux:select wire:model="accountType">
-                                <option value="checking">Checking</option>
-                                <option value="savings">Savings</option>
-                            </flux:select>
-                        </flux:field>
-                    </div>
-                @endif
-
-                <div class="flex justify-between mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-700">
-                    <flux:button wire:click="previousStep" variant="ghost">Back</flux:button>
-                    <flux:button wire:click="nextStep" variant="primary">Continue</flux:button>
-                </div>
-            </div>
-        </flux:card>
-    @endif
-
     {{-- Step 5: Review --}}
     @if($currentStep === 5)
         <flux:card class="max-w-2xl">
@@ -400,12 +505,42 @@
                         </div>
                         <div class="flex justify-between">
                             <span class="text-zinc-600 dark:text-zinc-400">Plan Fee ({{ $planDuration }} months)</span>
-                            <span>${{ number_format($planFee, 2) }}</span>
+                            <span class="{{ $waivePlanFee ? 'text-green-600 dark:text-green-400' : '' }}">
+                                @if($waivePlanFee)
+                                    <span class="line-through text-zinc-400 mr-1">${{ number_format(config('payment-fees.payment_plan_fees')[$planDuration] ?? 0, 2) }}</span>
+                                    $0.00 (Waived)
+                                @else
+                                    ${{ number_format($planFee, 2) }}
+                                @endif
+                            </span>
                         </div>
+                        @if($creditCardFee > 0)
+                        <div class="flex justify-between text-amber-700 dark:text-amber-400">
+                            <span>Credit Card Fee ({{ config('payment-fees.credit_card_rate') * 100 }}%)</span>
+                            <span>${{ number_format($creditCardFee, 2) }}</span>
+                        </div>
+                        @endif
                         <div class="border-t border-zinc-200 dark:border-zinc-700 pt-2 flex justify-between font-medium">
                             <span>Total Amount</span>
                             <span>${{ number_format($totalAmount, 2) }}</span>
                         </div>
+                        @if($downPayment > 0)
+                        <div class="flex justify-between font-medium text-green-600 dark:text-green-400">
+                            <span>
+                                @if($useCustomDownPayment)
+                                    Down Payment (Custom) - Due Today
+                                @else
+                                    Down Payment (30%) - Due Today
+                                @endif
+                            </span>
+                            <span>${{ number_format($downPayment, 2) }}</span>
+                        </div>
+                        @else
+                        <div class="flex justify-between font-medium text-zinc-500">
+                            <span>Down Payment</span>
+                            <span>$0.00 (None)</span>
+                        </div>
+                        @endif
                         <div class="flex justify-between text-lg font-bold text-blue-600">
                             <span>Monthly Payment</span>
                             <span>${{ number_format($monthlyPayment, 2) }}/month</span>
@@ -425,8 +560,16 @@
                     {{-- First Payment --}}
                     <div>
                         <flux:text class="text-sm text-zinc-500 mb-1">First Payment</flux:text>
-                        <flux:text class="font-medium">{{ $this->paymentSchedule[0]['date'] ?? 'N/A' }}</flux:text>
+                        <flux:text class="font-medium">{{ $this->paymentSchedule[0]['due_date'] ?? 'N/A' }}</flux:text>
                     </div>
+
+                    {{-- Recurring Payment Day --}}
+                    @if($recurringDay)
+                    <div>
+                        <flux:text class="text-sm text-zinc-500 mb-1">Recurring Payment Day</flux:text>
+                        <flux:text class="font-medium">Day {{ $recurringDay }} of each month</flux:text>
+                    </div>
+                    @endif
                 </div>
 
                 {{-- Confirmation --}}

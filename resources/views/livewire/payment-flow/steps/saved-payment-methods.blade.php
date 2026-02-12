@@ -196,106 +196,78 @@
     </div>
 
     {{-- Reassignment Modal --}}
-    @if($showReassignmentModal)
-        <div class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-            <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-                {{-- Background overlay --}}
-                <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" wire:click="closeReassignmentModal"></div>
-
-                {{-- Modal panel --}}
-                <div class="inline-block align-bottom bg-white dark:bg-zinc-800 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
-                    <div>
-                        <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-yellow-100 dark:bg-yellow-900/30">
-                            <svg class="h-6 w-6 text-yellow-600 dark:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                            </svg>
-                        </div>
-                        <div class="mt-3 text-center sm:mt-5">
-                            <h3 class="text-lg leading-6 font-medium text-zinc-900 dark:text-zinc-100" id="modal-title">
-                                Payment Method In Use
-                            </h3>
-                            <div class="mt-2">
-                                <p class="text-sm text-zinc-500 dark:text-zinc-400">
-                                    This payment method is linked to active payment plans or recurring payments. Please select a different payment method to use for these:
-                                </p>
-                            </div>
-
-                            {{-- List linked items --}}
-                            <div class="mt-4 text-left">
-                                @if(count($linkedPlansToReassign) > 0)
-                                    <div class="mb-3">
-                                        <h4 class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Payment Plans:</h4>
-                                        <ul class="mt-1 text-sm text-zinc-600 dark:text-zinc-400 list-disc list-inside">
-                                            @foreach($linkedPlansToReassign as $plan)
-                                                <li>{{ $plan['plan_id'] }} - ${{ number_format($plan['amount_remaining'], 2) }} remaining</li>
-                                            @endforeach
-                                        </ul>
-                                    </div>
-                                @endif
-                                @if(count($linkedRecurringToReassign) > 0)
-                                    <div class="mb-3">
-                                        <h4 class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Recurring Payments:</h4>
-                                        <ul class="mt-1 text-sm text-zinc-600 dark:text-zinc-400 list-disc list-inside">
-                                            @foreach($linkedRecurringToReassign as $recurring)
-                                                <li>{{ $recurring['description'] ?? 'Recurring payment' }} - ${{ number_format($recurring['amount'], 2) }}/{{ $recurring['frequency'] }}</li>
-                                            @endforeach
-                                        </ul>
-                                    </div>
-                                @endif
-                            </div>
-
-                            {{-- Select new method --}}
-                            @php
-                                $otherMethods = $savedPaymentMethods->filter(fn($m) => $m->id !== $methodToDelete && !$m->isExpired());
-                            @endphp
-
-                            @if($otherMethods->isNotEmpty())
-                                <div class="mt-4">
-                                    <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 text-left">
-                                        Reassign to:
-                                    </label>
-                                    <select wire:model="reassignToMethodId" class="mt-1 block w-full rounded-md border-zinc-300 dark:border-zinc-600 dark:bg-zinc-700 shadow-sm focus:border-zinc-500 focus:ring-zinc-500">
-                                        <option value="">Select a payment method...</option>
-                                        @foreach($otherMethods as $method)
-                                            <option value="{{ $method->id }}">{{ $method->display_name }}</option>
-                                        @endforeach
-                                    </select>
-                                </div>
-
-                                @error('reassignment')
-                                    <p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ $message }}</p>
-                                @enderror
-                            @else
-                                <div class="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-                                    <p class="text-sm text-yellow-700 dark:text-yellow-300">
-                                        You don't have any other payment methods saved. Please add a new payment method before deleting this one.
-                                    </p>
-                                </div>
-                            @endif
-                        </div>
-                    </div>
-                    <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
-                        @if($otherMethods->isNotEmpty())
-                            <button
-                                wire:click="reassignAndDelete"
-                                type="button"
-                                class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:col-start-2 sm:text-sm"
-                                wire:loading.attr="disabled"
-                            >
-                                <span wire:loading.remove wire:target="reassignAndDelete">Reassign & Delete</span>
-                                <span wire:loading wire:target="reassignAndDelete">Processing...</span>
-                            </button>
-                        @endif
-                        <button
-                            wire:click="closeReassignmentModal"
-                            type="button"
-                            class="mt-3 w-full inline-flex justify-center rounded-md border border-zinc-300 dark:border-zinc-600 shadow-sm px-4 py-2 bg-white dark:bg-zinc-700 text-base font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-zinc-500 sm:mt-0 sm:col-start-1 sm:text-sm"
-                        >
-                            Cancel
-                        </button>
-                    </div>
+    <flux:modal wire:model.self="showReassignmentModal" class="max-w-lg" :dismissible="false" @close="closeReassignmentModal">
+        <div class="space-y-6">
+            <div class="text-center">
+                <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-yellow-100 dark:bg-yellow-900/30">
+                    <flux:icon name="exclamation-triangle" class="h-6 w-6 text-yellow-600 dark:text-yellow-400" />
                 </div>
+                <flux:heading size="lg" class="mt-4">Payment Method In Use</flux:heading>
+                <flux:text class="mt-2">
+                    This payment method is linked to active payment plans or recurring payments. Please select a different payment method to use for these:
+                </flux:text>
+            </div>
+
+            {{-- List linked items --}}
+            <div class="text-left">
+                @if(count($linkedPlansToReassign) > 0)
+                    <div class="mb-3">
+                        <h4 class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Payment Plans:</h4>
+                        <ul class="mt-1 text-sm text-zinc-600 dark:text-zinc-400 list-disc list-inside">
+                            @foreach($linkedPlansToReassign as $plan)
+                                <li>{{ $plan['plan_id'] }} - ${{ number_format($plan['amount_remaining'], 2) }} remaining</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                @endif
+                @if(count($linkedRecurringToReassign) > 0)
+                    <div class="mb-3">
+                        <h4 class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Recurring Payments:</h4>
+                        <ul class="mt-1 text-sm text-zinc-600 dark:text-zinc-400 list-disc list-inside">
+                            @foreach($linkedRecurringToReassign as $recurring)
+                                <li>{{ $recurring['description'] ?? 'Recurring payment' }} - ${{ number_format($recurring['amount'], 2) }}/{{ $recurring['frequency'] }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                @endif
+            </div>
+
+            {{-- Select new method --}}
+            @php
+                $otherMethods = $savedPaymentMethods->filter(fn($m) => $m->id !== $methodToDelete && !$m->isExpired());
+            @endphp
+
+            @if($otherMethods->isNotEmpty())
+                <flux:field>
+                    <flux:label>Reassign to:</flux:label>
+                    <flux:select wire:model="reassignToMethodId">
+                        <flux:select.option value="">Select a payment method...</flux:select.option>
+                        @foreach($otherMethods as $method)
+                            <flux:select.option value="{{ $method->id }}">{{ $method->display_name }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                    <flux:error name="reassignment" />
+                </flux:field>
+            @else
+                <div class="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                    <p class="text-sm text-yellow-700 dark:text-yellow-300">
+                        You don't have any other payment methods saved. Please add a new payment method before deleting this one.
+                    </p>
+                </div>
+            @endif
+
+            <div class="flex gap-2">
+                <flux:spacer />
+                <flux:modal.close>
+                    <flux:button variant="ghost">Cancel</flux:button>
+                </flux:modal.close>
+                @if($otherMethods->isNotEmpty())
+                    <flux:button wire:click="reassignAndDelete" variant="danger" wire:loading.attr="disabled">
+                        <span wire:loading.remove wire:target="reassignAndDelete">Reassign & Delete</span>
+                        <span wire:loading wire:target="reassignAndDelete">Processing...</span>
+                    </flux:button>
+                @endif
             </div>
         </div>
-    @endif
+    </flux:modal>
 </x-payment.step>

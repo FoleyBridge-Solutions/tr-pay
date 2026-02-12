@@ -113,30 +113,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | SFTP Connection Settings (Legacy)
-    |--------------------------------------------------------------------------
-    |
-    | Kotapay also accepts ACH files via SFTP. Configure your
-    | connection details here. These will be provided by Kotapay.
-    |
-    */
-
-    'sftp' => [
-        'host' => env('KOTAPAY_SFTP_HOST', 'sftp.kotapay.com'),
-        'port' => env('KOTAPAY_SFTP_PORT', 22),
-        'username' => env('KOTAPAY_SFTP_USER'),
-        'password' => env('KOTAPAY_SFTP_PASS'),
-        'private_key' => env('KOTAPAY_SFTP_KEY_PATH'),
-        'private_key_passphrase' => env('KOTAPAY_SFTP_KEY_PASS'),
-
-        // Remote directories
-        'upload_path' => env('KOTAPAY_SFTP_UPLOAD_PATH', '/inbound'),
-        'download_path' => env('KOTAPAY_SFTP_DOWNLOAD_PATH', '/outbound'),
-        'returns_path' => env('KOTAPAY_SFTP_RETURNS_PATH', '/returns'),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
     | Originator Information
     |--------------------------------------------------------------------------
     |
@@ -215,29 +191,11 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | File Storage
-    |--------------------------------------------------------------------------
-    |
-    | Where to store generated NACHA files locally.
-    |
-    */
-
-    'storage' => [
-        'disk' => env('KOTAPAY_STORAGE_DISK', 'local'),
-        'path' => env('KOTAPAY_STORAGE_PATH', 'ach-files'),
-        'archive_path' => env('KOTAPAY_ARCHIVE_PATH', 'ach-files/archive'),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
     | Notifications
     |--------------------------------------------------------------------------
     */
 
     'notifications' => [
-        // Email to notify on file submission
-        'submission_email' => env('KOTAPAY_NOTIFICATION_EMAIL'),
-
         // Email to notify on returns
         'returns_email' => env('KOTAPAY_RETURNS_EMAIL'),
 

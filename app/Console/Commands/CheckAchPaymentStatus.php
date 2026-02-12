@@ -4,6 +4,8 @@ namespace App\Console\Commands;
 
 use App\Models\Customer;
 use App\Models\Payment;
+use App\Models\PaymentPlan;
+use App\Services\PracticeCsPaymentWriter;
 use App\Support\AdminNotifiable;
 use FoleyBridgeSolutions\KotapayCashier\Exceptions\PaymentFailedException;
 use Illuminate\Console\Command;
@@ -147,6 +149,11 @@ class CheckAchPaymentStatus extends Command
                             'payment_id' => $payment->id,
                             'vendor_transaction_id' => $payment->vendor_transaction_id,
                         ]);
+
+                        // Write to PracticeCS now that ACH has settled
+                        if (! $dryRun) {
+                            $this->writeDeferredPracticeCs($payment);
+                        }
                         break;
 
                     case 'returned':
@@ -175,6 +182,9 @@ class CheckAchPaymentStatus extends Command
                             'return_reason' => $returnReason,
                             'status' => $status,
                         ]);
+
+                        // If this payment belongs to a plan, free the pending allocations
+                        $this->revertPlanTrackingOnReturn($payment);
                         break;
 
                     default:
@@ -315,6 +325,78 @@ class CheckAchPaymentStatus extends Command
     }
 
     /**
+     * Write deferred PracticeCS payment data for a settled ACH payment.
+     *
+     * Reads the stored payload from the payment's metadata['practicecs_data']
+     * and writes it to PracticeCS via PracticeCsPaymentWriter::writeDeferredPayment().
+     *
+     * @param  Payment  $payment  The settled payment with deferred PracticeCS data
+     */
+    protected function writeDeferredPracticeCs(Payment $payment): void
+    {
+        $practiceCsData = $payment->metadata['practicecs_data'] ?? null;
+
+        if (! $practiceCsData) {
+            $this->warn("  [PracticeCS] No deferred data found for payment #{$payment->id}");
+
+            Log::info('ACH payment settled but no PracticeCS deferred data', [
+                'payment_id' => $payment->id,
+            ]);
+
+            return;
+        }
+
+        $this->line('  [PracticeCS] Writing deferred payment to PracticeCS...');
+
+        try {
+            $writer = app(PracticeCsPaymentWriter::class);
+            $result = $writer->writeDeferredPayment($practiceCsData);
+
+            if ($result['success']) {
+                // Record that PracticeCS write succeeded
+                $metadata = $payment->metadata;
+                $metadata['practicecs_written_at'] = now()->toIso8601String();
+                $metadata['practicecs_ledger_entry_KEY'] = $result['ledger_entry_KEY'] ?? null;
+                $payment->update(['metadata' => $metadata]);
+
+                // If this payment belongs to a plan, move amounts from pending to applied
+                $this->updatePlanTrackingOnSettlement($payment);
+
+                $this->info("  [PracticeCS] Written successfully (ledger_entry_KEY: {$result['ledger_entry_KEY']})");
+
+                Log::info('PracticeCS: Deferred ACH payment written on settlement', [
+                    'payment_id' => $payment->id,
+                    'ledger_entry_KEY' => $result['ledger_entry_KEY'],
+                ]);
+
+                if (! empty($result['warning'])) {
+                    $this->warn("  [PracticeCS] Warning: {$result['warning']}");
+
+                    Log::warning('PracticeCS: Deferred write completed with warning', [
+                        'payment_id' => $payment->id,
+                        'warning' => $result['warning'],
+                    ]);
+                }
+            } else {
+                $this->error("  [PracticeCS] Write failed: {$result['error']}");
+
+                Log::error('PracticeCS: Deferred ACH payment write failed', [
+                    'payment_id' => $payment->id,
+                    'error' => $result['error'],
+                ]);
+            }
+        } catch (\Exception $e) {
+            $this->error("  [PracticeCS] Exception: {$e->getMessage()}");
+
+            Log::error('PracticeCS: Exception writing deferred ACH payment', [
+                'payment_id' => $payment->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+        }
+    }
+
+    /**
      * Send admin notification about failed/returned ACH payments.
      *
      * @param  array  $failedPayments  Array of ['payment' => Payment, 'reason' => string, 'status' => string]
@@ -372,6 +454,102 @@ class CheckAchPaymentStatus extends Command
             $this->info('Admin notification sent for returned ACH payments.');
         } catch (\Exception $e) {
             Log::error('Failed to send ACH return notification', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Update payment plan tracking after a plan payment settles.
+     *
+     * Moves allocated amounts from practicecs_pending to practicecs_applied
+     * in the plan's metadata. Only applies to payments that belong to a plan.
+     *
+     * @param  Payment  $payment  The settled payment
+     */
+    protected function updatePlanTrackingOnSettlement(Payment $payment): void
+    {
+        if (! $payment->payment_plan_id) {
+            return;
+        }
+
+        $increments = $payment->metadata['practicecs_increments'] ?? null;
+        if (! $increments) {
+            return;
+        }
+
+        try {
+            $paymentPlan = PaymentPlan::find($payment->payment_plan_id);
+            if (! $paymentPlan) {
+                Log::warning('PracticeCS: Payment plan not found for settlement tracking', [
+                    'payment_id' => $payment->id,
+                    'payment_plan_id' => $payment->payment_plan_id,
+                ]);
+
+                return;
+            }
+
+            PracticeCsPaymentWriter::settlePlanTracking($paymentPlan, $increments);
+
+            $this->line("  [PracticeCS] Plan tracking updated (pending -> applied) for plan {$paymentPlan->plan_id}");
+
+            Log::info('PracticeCS: Plan tracking updated on ACH settlement', [
+                'payment_id' => $payment->id,
+                'plan_id' => $paymentPlan->plan_id,
+                'increments' => $increments,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('PracticeCS: Failed to update plan tracking on settlement', [
+                'payment_id' => $payment->id,
+                'payment_plan_id' => $payment->payment_plan_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Revert payment plan tracking after an ACH return/rejection.
+     *
+     * Removes allocated amounts from practicecs_pending in the plan's metadata,
+     * freeing those invoice allocations for future payments.
+     *
+     * @param  Payment  $payment  The returned/failed payment
+     */
+    protected function revertPlanTrackingOnReturn(Payment $payment): void
+    {
+        if (! $payment->payment_plan_id) {
+            return;
+        }
+
+        $increments = $payment->metadata['practicecs_increments'] ?? null;
+        if (! $increments) {
+            return;
+        }
+
+        try {
+            $paymentPlan = PaymentPlan::find($payment->payment_plan_id);
+            if (! $paymentPlan) {
+                Log::warning('PracticeCS: Payment plan not found for return tracking revert', [
+                    'payment_id' => $payment->id,
+                    'payment_plan_id' => $payment->payment_plan_id,
+                ]);
+
+                return;
+            }
+
+            PracticeCsPaymentWriter::revertPlanTracking($paymentPlan, $increments);
+
+            $this->line("  [PracticeCS] Plan tracking reverted (pending removed) for plan {$paymentPlan->plan_id}");
+
+            Log::info('PracticeCS: Plan tracking reverted on ACH return', [
+                'payment_id' => $payment->id,
+                'plan_id' => $paymentPlan->plan_id,
+                'increments' => $increments,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('PracticeCS: Failed to revert plan tracking on return', [
+                'payment_id' => $payment->id,
+                'payment_plan_id' => $payment->payment_plan_id,
                 'error' => $e->getMessage(),
             ]);
         }

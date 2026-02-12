@@ -14,7 +14,6 @@ return new class extends Migration
         Schema::create('ach_returns', function (Blueprint $table) {
             $table->id();
             $table->foreignId('ach_entry_id')->nullable()->constrained('ach_entries')->nullOnDelete();
-            $table->foreignId('ach_file_id')->nullable()->constrained('ach_files')->nullOnDelete();
 
             // Return identification
             $table->string('trace_number', 15);

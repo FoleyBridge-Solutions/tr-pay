@@ -16,6 +16,7 @@ use App\Services\EngagementAcceptanceService;
 use App\Services\PaymentService;
 use App\Services\PracticeCsPaymentWriter;
 use App\Support\Money;
+use Carbon\Carbon;
 use FoleyBridgeSolutions\MiPaymentChoiceCashier\Services\QuickPaymentsService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -35,7 +36,7 @@ use Livewire\Component;
  * 2. Select invoices and enter payment amount
  * 3. Enter payment method, review, and process/schedule payment
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class Create extends Component
 {
     use HasInvoiceManagement;
@@ -530,7 +531,7 @@ class Create extends Component
 
                         return false;
                     }
-                    if (strtotime($this->scheduledDate) <= strtotime('today')) {
+                    if (Carbon::parse($this->scheduledDate)->lte(today())) {
                         $this->errorMessage = 'Scheduled date must be in the future.';
 
                         return false;
@@ -561,6 +562,13 @@ class Create extends Component
         $this->errorMessage = null;
         $this->processing = true;
 
+        // Re-validate payment method fields before processing to catch malformed input
+        if (! $this->validatePaymentMethod()) {
+            $this->processing = false;
+
+            return;
+        }
+
         try {
             if ($this->scheduleForLater) {
                 $this->schedulePayment();
@@ -570,9 +578,14 @@ class Create extends Component
         } catch (\Exception $e) {
             Log::error('Failed to process payment', [
                 'error' => $e->getMessage(),
+                'client_id' => $this->selectedClient['client_id'] ?? null,
+                'payment_method' => $this->paymentMethodType,
+                'amount' => $this->paymentAmount ?? null,
                 'trace' => $e->getTraceAsString(),
             ]);
-            $this->errorMessage = 'Payment failed: '.$e->getMessage();
+
+            // Translate technical errors into user-friendly messages
+            $this->errorMessage = $this->formatPaymentError($e);
         } finally {
             $this->processing = false;
         }
@@ -660,7 +673,7 @@ class Create extends Component
             'engagement_count' => $engagementCount,
         ]);
 
-        $this->successMessage = 'Payment scheduled successfully for '.date('F j, Y', strtotime($this->scheduledDate)).'!';
+        $this->successMessage = 'Payment scheduled successfully for '.Carbon::parse($this->scheduledDate)->format('F j, Y').'!';
         $this->currentStep = 4; // Success step
 
         // Log the activity
@@ -727,7 +740,7 @@ class Create extends Component
         if ($this->paymentMethodType === 'saved') {
             $this->processWithSavedMethod($quickPayments, $practiceWriter);
         } else {
-            $this->processWithNewMethod($quickPayments, $practiceWriter);
+            $this->processWithManualEntry($quickPayments, $practiceWriter);
         }
     }
 
@@ -755,12 +768,30 @@ class Create extends Component
             'description' => 'Admin payment - '.count($this->selectedInvoices).' invoice(s)',
         ]);
 
-        if (! $chargeResponse || empty($chargeResponse['TransactionKey'])) {
-            throw new \Exception($chargeResponse['ResponseStatus']['Message'] ?? 'Payment failed');
+        if (! $chargeResponse) {
+            throw new \Exception('No response received from payment gateway.');
+        }
+
+        // Gateway returns TransactionId (not TransactionKey)
+        $gatewayTransactionId = $chargeResponse['PnRef'] ?? $chargeResponse['TransactionId'] ?? null;
+
+        if (empty($gatewayTransactionId)) {
+            Log::error('Saved method charge response missing transaction ID', [
+                'client_id' => $this->selectedClient['client_id'] ?? null,
+                'payment_method_id' => $savedMethod->id,
+                'response' => $chargeResponse,
+            ]);
+
+            $errorMessage = $chargeResponse['ResponseMessage']
+                ?? $chargeResponse['ResponseStatus']['Message']
+                ?? $chargeResponse['ResultText']
+                ?? 'Payment failed — no transaction ID returned from gateway';
+
+            throw new \Exception($errorMessage);
         }
 
         $this->recordSuccessfulPayment(
-            $chargeResponse['TransactionKey'],
+            (string) $gatewayTransactionId,
             $isCard ? 'credit_card' : 'ach',
             $savedMethod->last_four,
             $practiceWriter,
@@ -769,9 +800,9 @@ class Create extends Component
     }
 
     /**
-     * Process payment with new card/ACH details.
+     * Process payment with manually entered card/ACH details.
      */
-    protected function processWithNewMethod(QuickPaymentsService $quickPayments, PracticeCsPaymentWriter $practiceWriter): void
+    protected function processWithManualEntry(QuickPaymentsService $quickPayments, PracticeCsPaymentWriter $practiceWriter): void
     {
         $paymentService = app(PaymentService::class);
 
@@ -786,12 +817,26 @@ class Create extends Component
         }
 
         if ($this->paymentMethodType === 'card') {
+            // Parse expiry — supports MM/YY (e.g. "06/28") and M/D/YYYY (e.g. "6/1/2028")
             $expiryParts = explode('/', $this->cardExpiry);
+
+            if (count($expiryParts) === 3) {
+                // M/D/YYYY format — month is first part, year is third part
+                $expMonth = (int) $expiryParts[0];
+                $expYear = (int) $expiryParts[2];
+            } elseif (count($expiryParts) === 2) {
+                // MM/YY format — month is first part, year is second part
+                $expMonth = (int) $expiryParts[0];
+                $rawYear = $expiryParts[1];
+                $expYear = strlen((string) $rawYear) <= 2 ? (int) ('20'.$rawYear) : (int) $rawYear;
+            } else {
+                throw new \Exception('Invalid card expiry format. Please use MM/YY.');
+            }
 
             $tokenResponse = $quickPayments->createQpToken([
                 'number' => preg_replace('/\D/', '', $this->cardNumber),
-                'exp_month' => $expiryParts[0],
-                'exp_year' => '20'.$expiryParts[1],
+                'exp_month' => $expMonth,
+                'exp_year' => $expYear,
                 'cvc' => $this->cardCvv,
                 'name' => $this->cardName,
             ]);
@@ -809,12 +854,26 @@ class Create extends Component
             $lastFour = substr(preg_replace('/\D/', '', $this->cardNumber), -4);
             $methodType = 'credit_card';
 
-            if (empty($chargeResponse['TransactionKey'])) {
-                throw new \Exception($chargeResponse['ResponseStatus']['Message'] ?? 'Payment failed');
+            // Gateway returns TransactionId (not TransactionKey)
+            $gatewayTransactionId = $chargeResponse['PnRef'] ?? $chargeResponse['TransactionId'] ?? null;
+
+            if (empty($gatewayTransactionId)) {
+                Log::error('Card charge response missing transaction ID', [
+                    'transaction_id' => $this->transactionId,
+                    'client_id' => $this->selectedClient['client_id'] ?? null,
+                    'response' => $chargeResponse,
+                ]);
+
+                $errorMessage = $chargeResponse['ResponseMessage']
+                    ?? $chargeResponse['ResponseStatus']['Message']
+                    ?? $chargeResponse['ResultText']
+                    ?? 'Payment failed — no transaction ID returned from gateway';
+
+                throw new \Exception($errorMessage);
             }
 
             $this->recordSuccessfulPayment(
-                $chargeResponse['TransactionKey'],
+                (string) $gatewayTransactionId,
                 $methodType,
                 $lastFour,
                 $practiceWriter,
@@ -923,7 +982,21 @@ class Create extends Component
 
         // Write to PracticeCS if enabled
         if (config('practicecs.payment_integration.enabled')) {
-            $this->writeToPracticeCs($practiceWriter, $methodType);
+            if ($isAch) {
+                // ACH: Defer PracticeCS write until settlement is confirmed
+                $practiceCsPayload = $this->buildPracticeCsPayload($practiceWriter, $methodType);
+                $metadata = $payment->metadata ?? [];
+                $metadata['practicecs_data'] = $practiceCsPayload;
+                $payment->update(['metadata' => $metadata]);
+
+                Log::info('ACH payment: PracticeCS write deferred until settlement', [
+                    'transaction_id' => $this->transactionId,
+                    'payment_id' => $payment->id,
+                ]);
+            } else {
+                // Card payments: Write to PracticeCS immediately
+                $this->writeToPracticeCs($practiceWriter, $methodType);
+            }
         }
 
         $this->successMessage = $isAch
@@ -996,12 +1069,13 @@ class Create extends Component
     }
 
     /**
-     * Write payment to PracticeCS.
+     * Build the PracticeCS payload without writing it.
      *
-     * Uses getBasePaymentAmount() to write the amount applied to client account
-     * (which excludes fee when fee is included in custom amount).
+     * Used for both immediate writes (cards) and deferred writes (ACH).
+     *
+     * @return array Structured payload with 'payment' key for writeDeferredPayment()
      */
-    protected function writeToPracticeCs(PracticeCsPaymentWriter $writer, string $methodType): void
+    protected function buildPracticeCsPayload(PracticeCsPaymentWriter $writer, string $methodType): array
     {
         $invoiceCount = $this->leaveUnapplied ? 0 : count($this->selectedInvoices);
         $engagementCount = count($this->selectedEngagements);
@@ -1018,29 +1092,42 @@ class Create extends Component
             $comments = "Online payment - {$methodType} - {$invoiceCount} invoice(s)";
         }
 
-        $practiceCsData = [
-            'client_KEY' => $this->selectedClient['client_KEY'],
-            'amount' => $baseAmount,
-            'reference' => $this->transactionId,
-            'comments' => $comments,
-            'internal_comments' => json_encode([
-                'source' => 'tr-pay-admin',
-                'transaction_id' => $this->transactionId,
-                'payment_method' => $methodType,
-                'fee' => $this->getCreditCardFee(),
-                'processed_at' => now()->toIso8601String(),
-                'unapplied' => $this->leaveUnapplied,
-                'fee_included_in_amount' => $this->feeIncludedInCustomAmount,
-                'engagement_keys' => $this->selectedEngagements,
-            ]),
-            'staff_KEY' => config('practicecs.payment_integration.staff_key'),
-            'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
-            'ledger_type_KEY' => config("practicecs.payment_integration.ledger_types.{$methodType}"),
-            'subtype_KEY' => config("practicecs.payment_integration.payment_subtypes.{$methodType}"),
-            'invoices' => $this->leaveUnapplied ? [] : $this->getInvoicesForApplication(),
+        return [
+            'payment' => [
+                'client_KEY' => $this->selectedClient['client_KEY'],
+                'amount' => $baseAmount,
+                'reference' => $this->transactionId,
+                'comments' => $comments,
+                'internal_comments' => json_encode([
+                    'source' => 'tr-pay-admin',
+                    'transaction_id' => $this->transactionId,
+                    'payment_method' => $methodType,
+                    'fee' => $this->getCreditCardFee(),
+                    'processed_at' => now()->toIso8601String(),
+                    'unapplied' => $this->leaveUnapplied,
+                    'fee_included_in_amount' => $this->feeIncludedInCustomAmount,
+                    'engagement_keys' => $this->selectedEngagements,
+                ]),
+                'staff_KEY' => config('practicecs.payment_integration.staff_key'),
+                'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
+                'ledger_type_KEY' => config("practicecs.payment_integration.ledger_types.{$methodType}"),
+                'subtype_KEY' => config("practicecs.payment_integration.payment_subtypes.{$methodType}"),
+                'invoices' => $this->leaveUnapplied ? [] : $this->getInvoicesForApplication(),
+            ],
         ];
+    }
 
-        $result = $writer->writePayment($practiceCsData);
+    /**
+     * Write payment to PracticeCS.
+     *
+     * Uses getBasePaymentAmount() to write the amount applied to client account
+     * (which excludes fee when fee is included in custom amount).
+     */
+    protected function writeToPracticeCs(PracticeCsPaymentWriter $writer, string $methodType): void
+    {
+        $payload = $this->buildPracticeCsPayload($writer, $methodType);
+
+        $result = $writer->writeDeferredPayment($payload);
 
         if (! $result['success']) {
             Log::error('Failed to write payment to PracticeCS', [
@@ -1194,6 +1281,96 @@ class Create extends Component
         $this->currentStep = 1;
         $this->paymentMethodType = 'card';
         $this->savedPaymentMethods = collect();
+    }
+
+    /**
+     * Format a payment exception into a user-friendly error message.
+     *
+     * Maps common technical errors (gateway responses, validation failures,
+     * PHP errors) to clear, actionable messages for admin users.
+     *
+     * @param  \Exception  $e  The caught exception
+     * @return string User-friendly error message
+     */
+    protected function formatPaymentError(\Exception $e): string
+    {
+        $message = $e->getMessage();
+        $messageLower = strtolower($message);
+
+        // Card input validation errors — pass through as-is (already user-friendly)
+        if (str_contains($messageLower, 'invalid card expiry')
+            || str_contains($messageLower, 'please use mm/yy')
+            || str_contains($messageLower, 'no saved payment method')) {
+            return $message;
+        }
+
+        // Token creation failures
+        if (str_contains($messageLower, 'failed to create payment token')) {
+            return 'Unable to process card details. Please verify the card number, expiry date, and CVV are correct.';
+        }
+
+        // Gateway-specific error patterns
+        if (str_contains($messageLower, 'declined') || str_contains($messageLower, 'do not honor')) {
+            return 'The card was declined. Please try a different card or contact the cardholder\'s bank.';
+        }
+
+        if (str_contains($messageLower, 'insufficient funds')) {
+            return 'Insufficient funds on the card. Please try a different payment method.';
+        }
+
+        if (str_contains($messageLower, 'expired')) {
+            return 'The card has expired. Please use a different card.';
+        }
+
+        if (str_contains($messageLower, 'invalid card') || str_contains($messageLower, 'invalid account')) {
+            return 'Invalid card information. Please verify the card details and try again.';
+        }
+
+        if (str_contains($messageLower, 'cvv') || str_contains($messageLower, 'cvc') || str_contains($messageLower, 'security code')) {
+            return 'Invalid security code (CVV). Please check and try again.';
+        }
+
+        if (str_contains($messageLower, 'address') || str_contains($messageLower, 'avs')) {
+            return 'Address verification failed. Please check the billing address.';
+        }
+
+        if (str_contains($messageLower, 'duplicate')) {
+            return 'This appears to be a duplicate transaction. Please wait a moment before trying again.';
+        }
+
+        if (str_contains($messageLower, 'could not be processed') || str_contains($messageLower, 'contact support')) {
+            return 'The payment gateway could not process this transaction. Please try again or use a different payment method.';
+        }
+
+        if (str_contains($messageLower, 'timeout') || str_contains($messageLower, 'connection')) {
+            return 'Connection to the payment gateway timed out. Please try again in a moment.';
+        }
+
+        // ACH-specific errors
+        if (str_contains($messageLower, 'routing number') || str_contains($messageLower, 'routing_number')) {
+            return 'Invalid routing number. Please verify the bank routing number.';
+        }
+
+        if (str_contains($messageLower, 'account closed')) {
+            return 'The bank account appears to be closed. Please use a different account.';
+        }
+
+        if (str_contains($messageLower, 'ach') && str_contains($messageLower, 'not') && str_contains($messageLower, 'enabled')) {
+            return 'ACH payments are not currently enabled. Please use a credit card instead.';
+        }
+
+        // PHP-level errors that leaked through (e.g. undefined array key, type errors)
+        if (str_contains($messageLower, 'undefined') || str_contains($messageLower, 'type error') || str_contains($messageLower, 'cannot access')) {
+            return 'An unexpected error occurred while processing the payment. Please verify all fields are filled in correctly and try again.';
+        }
+
+        // Generic gateway failure — show the gateway message if it looks user-safe
+        if (str_contains($messageLower, 'payment failed')) {
+            return $message;
+        }
+
+        // Default fallback
+        return 'Payment could not be processed. Please verify your information and try again, or use a different payment method.';
     }
 
     public function render()

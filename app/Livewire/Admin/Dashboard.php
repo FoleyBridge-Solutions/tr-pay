@@ -12,7 +12,7 @@ use Livewire\Component;
  *
  * Displays overview statistics and recent activity.
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class Dashboard extends Component
 {
     /**

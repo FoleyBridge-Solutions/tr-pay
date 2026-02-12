@@ -16,7 +16,7 @@ use Livewire\WithPagination;
  *
  * Admin user management - list, create, edit, and deactivate users.
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class Index extends Component
 {
     use WithPagination;
@@ -59,6 +59,16 @@ class Index extends Component
         $this->reset(['name', 'email', 'password', 'passwordConfirmation']);
         $this->resetValidation();
         $this->showCreateModal = true;
+    }
+
+    /**
+     * Reset create modal state when closed.
+     */
+    public function resetCreateModal(): void
+    {
+        $this->showCreateModal = false;
+        $this->reset(['name', 'email', 'password', 'passwordConfirmation']);
+        $this->resetValidation();
     }
 
     /**
@@ -106,6 +116,18 @@ class Index extends Component
 
         $this->resetValidation();
         $this->showEditModal = true;
+    }
+
+    /**
+     * Reset edit modal state when closed.
+     */
+    public function resetEditModal(): void
+    {
+        $this->showEditModal = false;
+        $this->editingUser = null;
+        $this->reset(['editName', 'editEmail', 'editPassword']);
+        $this->editIsActive = true;
+        $this->resetValidation();
     }
 
     /**

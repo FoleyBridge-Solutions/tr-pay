@@ -80,7 +80,7 @@
                             </div>
 
                             @if($paymentType === 'card')
-                                <div class="space-y-4">
+                                <div wire:key="payment-fields-card" class="space-y-4">
                                     <flux:field>
                                         <flux:label>Card Number</flux:label>
                                         <flux:input wire:model="cardNumber" placeholder="1234 5678 9012 3456" />
@@ -103,7 +103,7 @@
                                     </flux:field>
                                 </div>
                             @else
-                                <div class="space-y-4">
+                                <div wire:key="payment-fields-ach" class="space-y-4">
                                     <flux:field>
                                         <flux:label>Account Holder Name</flux:label>
                                         <flux:input wire:model="accountName" placeholder="John Doe" />
@@ -331,52 +331,43 @@
     @endif
 
     {{-- Delete Confirmation Modal --}}
-    @if($showDeleteModal && $methodToDelete)
-        <div class="fixed inset-0 z-50 overflow-y-auto">
-            <div class="flex items-center justify-center min-h-screen px-4">
-                {{-- Backdrop --}}
-                <div class="fixed inset-0 bg-black/50" wire:click="cancelDelete"></div>
+    <flux:modal name="delete-payment-method" class="max-w-md" :dismissible="false" @close="cancelDelete">
+        <div class="space-y-6" x-data="{ get d() { return $wire.deleteMethodDetails } }">
+            <div class="text-center">
+                <div class="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto">
+                    <flux:icon name="exclamation-triangle" class="w-6 h-6 text-red-600 dark:text-red-400" />
+                </div>
 
-                {{-- Modal --}}
-                <div class="relative bg-white dark:bg-zinc-900 rounded-xl shadow-xl max-w-md w-full p-6">
-                    <div class="text-center">
-                        <div class="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <flux:icon name="exclamation-triangle" class="w-6 h-6 text-red-600 dark:text-red-400" />
-                        </div>
+                <flux:heading size="lg" class="mt-4">Delete Payment Method?</flux:heading>
 
-                        <flux:heading size="lg" class="mb-2">Delete Payment Method?</flux:heading>
+                <flux:text class="mt-2 text-zinc-500">
+                    Are you sure you want to delete <strong x-text="d.display_name ?? 'this payment method'"></strong>?
+                    This action cannot be undone.
+                </flux:text>
 
-                        <flux:text class="text-zinc-500 mb-6">
-                            Are you sure you want to delete <strong>{{ $methodToDelete->display_name }}</strong>?
-                            This action cannot be undone.
-                        </flux:text>
-
-                        @if($methodToDelete->isLinkedToActivePlans())
-                            <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 mb-6 text-left">
-                                <div class="flex items-start gap-3">
-                                    <flux:icon name="exclamation-triangle" class="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                                    <div class="text-sm">
-                                        <strong class="text-amber-800 dark:text-amber-200">Warning:</strong>
-                                        <span class="text-amber-700 dark:text-amber-300">
-                                            This payment method is linked to active payment plans or recurring payments.
-                                            Deleting it may cause payment failures.
-                                        </span>
-                                    </div>
-                                </div>
+                <template x-if="d.is_linked_to_active_plans">
+                    <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 mt-4 text-left">
+                        <div class="flex items-start gap-3">
+                            <flux:icon name="exclamation-triangle" class="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                            <div class="text-sm">
+                                <strong class="text-amber-800 dark:text-amber-200">Warning:</strong>
+                                <span class="text-amber-700 dark:text-amber-300">
+                                    This payment method is linked to active payment plans or recurring payments.
+                                    Deleting it may cause payment failures.
+                                </span>
                             </div>
-                        @endif
-
-                        <div class="flex justify-center gap-3">
-                            <flux:button wire:click="cancelDelete" variant="ghost">
-                                Cancel
-                            </flux:button>
-                            <flux:button wire:click="deletePaymentMethod" variant="danger">
-                                Delete
-                            </flux:button>
                         </div>
                     </div>
-                </div>
+                </template>
+            </div>
+
+            <div class="flex gap-2">
+                <flux:spacer />
+                <flux:modal.close>
+                    <flux:button variant="ghost">Cancel</flux:button>
+                </flux:modal.close>
+                <flux:button wire:click="deletePaymentMethod" variant="danger">Delete</flux:button>
             </div>
         </div>
-    @endif
+    </flux:modal>
 </div>

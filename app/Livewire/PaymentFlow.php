@@ -18,13 +18,12 @@ use App\Services\PaymentService;
 use App\Support\Money;
 use Flux\Flux;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
-#[Layout('layouts.app')]
+#[Layout('layouts::app')]
 class PaymentFlow extends Component
 {
     use HasCardFormatting;
@@ -235,17 +234,18 @@ class PaymentFlow extends Component
         // Set loading state for skeleton
         $this->loadingInvoices = true;
 
-        // Check for pending engagements BEFORE loading invoices
-        $this->checkForPendingEngagements();
+        // Engagements/fee request step temporarily disabled
+        // $this->checkForPendingEngagements();
+        //
+        // if ($this->hasEngagementsToAccept) {
+        //     $this->goToStep(Steps::PROJECT_ACCEPTANCE);
+        //     $this->loadingInvoices = false;
+        // } else {
+        //     $this->goToStep(Steps::LOADING_INVOICES);
+        // }
 
-        if ($this->hasEngagementsToAccept) {
-            // Go to project acceptance step
-            $this->goToStep(Steps::PROJECT_ACCEPTANCE);
-            $this->loadingInvoices = false;
-        } else {
-            // Show loading skeleton - onSkeletonComplete will load invoices
-            $this->goToStep(Steps::LOADING_INVOICES);
-        }
+        // Show loading skeleton - onSkeletonComplete will load invoices
+        $this->goToStep(Steps::LOADING_INVOICES);
     }
 
     /**
@@ -445,6 +445,9 @@ class PaymentFlow extends Component
                     'invoice_number' => $invoice['invoice_number'],
                     'description' => $invoice['description'],
                     'amount' => $invoice['open_amount'],
+                    'ledger_entry_KEY' => $invoice['ledger_entry_KEY'] ?? null,
+                    'open_amount' => $invoice['open_amount'],
+                    'client_KEY' => $invoice['client_KEY'] ?? null,
                 ] : null;
             })->filter()->values()->toArray(),
             'notes' => $this->paymentNotes,
@@ -493,6 +496,7 @@ class PaymentFlow extends Component
                         [
                             'amount' => $this->paymentAmount,
                             'planFee' => $this->paymentPlanFee,
+                            'creditCardFee' => $this->creditCardFee,
                             'planDuration' => $this->planDuration,
                             'paymentSchedule' => $this->paymentSchedule,
                             'invoices' => $paymentData['invoices'],
@@ -557,6 +561,7 @@ class PaymentFlow extends Component
                     [
                         'amount' => $this->paymentAmount,
                         'planFee' => $this->paymentPlanFee,
+                        'creditCardFee' => $this->creditCardFee,
                         'planDuration' => $this->planDuration,
                         'paymentSchedule' => $this->paymentSchedule,
                         'invoices' => $paymentData['invoices'],
@@ -664,7 +669,7 @@ class PaymentFlow extends Component
                     ? substr(str_replace(' ', '', $this->cardNumber), -4)
                     : substr($this->accountNumber, -4);
 
-                $this->paymentService->recordPayment([
+                $payment = $this->paymentService->recordPayment([
                     'amount' => $this->paymentAmount,
                     'fee' => $this->creditCardFee,
                     'paymentMethod' => $this->paymentMethod,
@@ -729,15 +734,36 @@ class PaymentFlow extends Component
             // Write payment to PracticeCS if enabled
             if (config('practicecs.payment_integration.enabled')) {
                 try {
-                    $this->writeToPracticeCs($paymentResult);
+                    if ($this->isPaymentPlan) {
+                        // Payment plan PracticeCS writes are handled inside
+                        // PaymentService::createPaymentPlan() for down payments
+                        // and ProcessScheduledPayment for installments.
+                        Log::info('Payment plan: PracticeCS write handled by plan service', [
+                            'transaction_id' => $this->transactionId,
+                        ]);
+                    } elseif ($this->paymentMethod === 'ach' && isset($payment)) {
+                        // ACH: Defer PracticeCS write until settlement is confirmed.
+                        // Store the full payload so CheckAchPaymentStatus can write it later.
+                        $practiceCsPayload = $this->buildPracticeCsPayload($paymentResult);
+                        $metadata = $payment->metadata ?? [];
+                        $metadata['practicecs_data'] = $practiceCsPayload;
+                        $payment->update(['metadata' => $metadata]);
+
+                        Log::info('ACH payment: PracticeCS write deferred until settlement', [
+                            'transaction_id' => $this->transactionId,
+                            'payment_id' => $payment->id,
+                        ]);
+                    } else {
+                        // Card payments: Write to PracticeCS immediately (cards settle instantly)
+                        $this->writeToPracticeCs($paymentResult);
+                    }
                 } catch (\Exception $e) {
-                    // Log but don't fail the payment - it already succeeded with MiPaymentChoice
-                    Log::error('Failed to write payment to PracticeCS', [
+                    // Log but don't fail the payment - it already succeeded with the gateway
+                    Log::error('Failed to handle PracticeCS write/deferral', [
                         'transaction_id' => $this->transactionId,
                         'error' => $e->getMessage(),
                         'trace' => $e->getTraceAsString(),
                     ]);
-                    // Could queue for retry here
                 }
             }
 
@@ -789,19 +815,17 @@ class PaymentFlow extends Component
     }
 
     /**
-     * Write payment to PracticeCS with client group support
+     * Build the PracticeCS payload for this payment without writing it.
      *
-     * Handles payments across client groups by:
-     * 1. Writing payment to primary client
-     * 2. Applying payment to primary client's invoices
-     * 3. Creating debit memo on primary client for overpayment
-     * 4. Creating credit memos on other group clients
-     * 5. Applying credit memos to other clients' invoices
+     * This data structure can be stored in the payment's metadata for deferred
+     * writing (ACH payments that need to wait for settlement confirmation),
+     * or used immediately by writeToPracticeCs() for card payments.
+     *
+     * @param  array  $paymentResult  Gateway payment result with transaction_id
+     * @return array Structured payload containing 'payment' data and optional 'group_distribution'
      */
-    protected function writeToPracticeCs(array $paymentResult): void
+    protected function buildPracticeCsPayload(array $paymentResult): array
     {
-        $writer = app(\App\Services\PracticeCsPaymentWriter::class);
-
         // Get payment method type mapping
         $paymentMethodMap = [
             'credit_card' => 'credit_card',
@@ -816,6 +840,7 @@ class PaymentFlow extends Component
 
         // Get primary client KEY (the client who logged in)
         $primaryClientKey = $this->clientInfo['client_KEY'] ?? $this->clientInfo['clients'][0]['client_KEY'];
+        $primaryClientName = $this->clientInfo['client_name'] ?? 'group member';
 
         // Step 1: Separate invoices by client
         $primaryInvoices = [];
@@ -825,7 +850,7 @@ class PaymentFlow extends Component
             $invoice = collect($this->openInvoices)->firstWhere('invoice_number', $invoiceNumber);
 
             if (! $invoice) {
-                Log::warning('Invoice not found for application', [
+                Log::warning('Invoice not found for PracticeCS payload', [
                     'invoice_number' => $invoiceNumber,
                     'transaction_id' => $paymentResult['transaction_id'],
                 ]);
@@ -854,23 +879,7 @@ class PaymentFlow extends Component
             }
         }
 
-        // Step 2: Calculate amounts
-        $primaryInvoicesTotal = array_sum(array_column($primaryInvoices, 'open_amount'));
-        $otherInvoicesTotal = 0;
-
-        foreach ($otherClientsInvoices as $clientGroup) {
-            $otherInvoicesTotal += array_sum(array_column($clientGroup['invoices'], 'open_amount'));
-        }
-
-        Log::info('Payment distribution analysis', [
-            'total_payment' => $paymentAmount,
-            'primary_client_KEY' => $primaryClientKey,
-            'primary_invoices_total' => $primaryInvoicesTotal,
-            'other_clients_count' => count($otherClientsInvoices),
-            'other_invoices_total' => $otherInvoicesTotal,
-        ]);
-
-        // Step 3: Write payment to primary client
+        // Step 2: Build primary client invoice applications
         $primaryInvoicesToApply = [];
         $remainingAmount = $paymentAmount;
 
@@ -887,64 +896,40 @@ class PaymentFlow extends Component
             $remainingAmount -= $applyAmount;
         }
 
-        // Prepare payment data for PracticeCS
-        $practiceCsData = [
-            'client_KEY' => $primaryClientKey,
-            'amount' => $paymentAmount,  // EXCLUDE credit card fee!
-            'reference' => $paymentResult['transaction_id'],
-            'comments' => "Online payment - {$this->paymentMethod} - ".count($this->selectedInvoices).' invoice(s)',
-            'internal_comments' => json_encode([
-                'source' => 'tr-pay',
-                'transaction_id' => $paymentResult['transaction_id'],
-                'payment_method' => $this->paymentMethod,
-                'is_payment_plan' => $this->isPaymentPlan,
-                'fee' => $this->creditCardFee,
-                'has_group_distribution' => ! empty($otherClientsInvoices),
-                'processed_at' => now()->toIso8601String(),
-            ]),
-            'staff_KEY' => config('practicecs.payment_integration.staff_key'),
-            'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
-            'ledger_type_KEY' => config("practicecs.payment_integration.ledger_types.{$methodType}"),
-            'subtype_KEY' => config("practicecs.payment_integration.payment_subtypes.{$methodType}"),
-            'invoices' => $primaryInvoicesToApply,
+        // Step 3: Build the primary payment data
+        $payload = [
+            'payment' => [
+                'client_KEY' => $primaryClientKey,
+                'amount' => $paymentAmount,
+                'reference' => $paymentResult['transaction_id'],
+                'comments' => "Online payment - {$this->paymentMethod} - ".count($this->selectedInvoices).' invoice(s)',
+                'internal_comments' => json_encode([
+                    'source' => 'tr-pay',
+                    'transaction_id' => $paymentResult['transaction_id'],
+                    'payment_method' => $this->paymentMethod,
+                    'is_payment_plan' => $this->isPaymentPlan,
+                    'fee' => $this->creditCardFee,
+                    'has_group_distribution' => ! empty($otherClientsInvoices),
+                    'processed_at' => now()->toIso8601String(),
+                ]),
+                'staff_KEY' => config('practicecs.payment_integration.staff_key'),
+                'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
+                'ledger_type_KEY' => config("practicecs.payment_integration.ledger_types.{$methodType}"),
+                'subtype_KEY' => config("practicecs.payment_integration.payment_subtypes.{$methodType}"),
+                'invoices' => $primaryInvoicesToApply,
+            ],
         ];
 
-        $result = $writer->writePayment($practiceCsData);
-
-        if (! $result['success']) {
-            throw new \Exception('PracticeCS payment write failed: '.($result['error'] ?? 'Unknown error'));
-        }
-
-        $paymentLedgerKey = $result['ledger_entry_KEY'];
-
-        Log::info('Payment written to PracticeCS', [
-            'transaction_id' => $paymentResult['transaction_id'],
-            'ledger_entry_KEY' => $paymentLedgerKey,
-            'entry_number' => $result['entry_number'],
-            'remaining_amount' => $remainingAmount,
-        ]);
-
-        // Step 4: Handle client group distribution if needed
+        // Step 4: Build group distribution data if needed
         if ($remainingAmount > 0.01 && ! empty($otherClientsInvoices)) {
-            // Generate unique memo reference with date
-            $memoReference = 'MEMO_'.now()->format('Ymd').'_'.$paymentResult['transaction_id'];
-
-            Log::info('Creating memos for client group distribution', [
-                'memo_reference' => $memoReference,
-                'remaining_amount' => $remainingAmount,
-                'other_clients_count' => count($otherClientsInvoices),
-            ]);
-
-            $distributedAmount = 0;
-            $connection = config('practicecs.payment_integration.connection', 'sqlsrv');
             $staffKey = config('practicecs.payment_integration.staff_key');
+            $distributedAmount = 0;
+            $groupDistribution = [];
 
-            // Process each other client
             foreach ($otherClientsInvoices as $clientData) {
                 $clientKey = $clientData['client_KEY'];
                 $clientInvoices = $clientData['invoices'];
 
-                // Calculate amount for this client
                 $clientTotal = array_sum(array_column($clientInvoices, 'open_amount'));
                 $clientAmount = min($remainingAmount - $distributedAmount, $clientTotal);
 
@@ -952,46 +937,7 @@ class PaymentFlow extends Component
                     break;
                 }
 
-                // Step 4a: Create CREDIT MEMO on OTHER client
-                // This represents money "received" by the other client from the logged-in client
-                $creditMemoData = [
-                    'client_KEY' => $clientKey,
-                    'amount' => $clientAmount,
-                    'reference' => $memoReference,
-                    'comments' => 'Credit memo - payment from '.($this->clientInfo['client_name'] ?? 'group member'),
-                    'internal_comments' => json_encode([
-                        'source' => 'tr-pay',
-                        'transaction_id' => $paymentResult['transaction_id'],
-                        'original_payment_key' => $paymentLedgerKey,
-                        'memo_type' => 'credit',
-                        'from_client_KEY' => $primaryClientKey,
-                        'from_client_name' => $this->clientInfo['client_name'] ?? '',
-                        'group_distribution' => true,
-                        'processed_at' => now()->toIso8601String(),
-                    ]),
-                    'staff_KEY' => $staffKey,
-                    'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
-                    'ledger_type_KEY' => config('practicecs.payment_integration.memo_types.credit'),
-                    'subtype_KEY' => config('practicecs.payment_integration.memo_subtypes.credit'),
-                    'invoices' => [],
-                ];
-
-                $creditResult = $writer->writeMemo($creditMemoData, 'credit');
-
-                if (! $creditResult['success']) {
-                    throw new \Exception("Failed to create credit memo for client {$clientKey}: ".($creditResult['error'] ?? 'Unknown error'));
-                }
-
-                $creditMemoLedgerKey = $creditResult['ledger_entry_KEY'];
-
-                Log::info('Credit memo created', [
-                    'client_KEY' => $clientKey,
-                    'client_name' => $clientData['client_name'],
-                    'ledger_entry_KEY' => $creditMemoLedgerKey,
-                    'amount' => $clientAmount,
-                ]);
-
-                // Step 4b: Apply OTHER client's invoices TO the credit memo
+                // Build invoice applications for this client
                 $invoicesToApply = [];
                 $applyRemaining = $clientAmount;
 
@@ -1008,92 +954,82 @@ class PaymentFlow extends Component
                     $applyRemaining -= $applyAmount;
                 }
 
-                if (! empty($invoicesToApply)) {
-                    DB::connection($connection)->transaction(function () use ($connection, $creditMemoLedgerKey, $invoicesToApply, $writer, $staffKey) {
-                        $reflection = new \ReflectionClass($writer);
-                        $method = $reflection->getMethod('applyPaymentToInvoices');
-                        $method->setAccessible(true);
-                        $method->invoke($writer, $connection, $creditMemoLedgerKey, $invoicesToApply, $staffKey);
-                    });
-
-                    Log::info('Credit memo applied to invoices', [
-                        'credit_memo_KEY' => $creditMemoLedgerKey,
-                        'invoices_count' => count($invoicesToApply),
-                    ]);
-                }
-
-                // Step 4c: Create DEBIT MEMO on LOGGED-IN client
-                // This represents money "sent" from the logged-in client to cover the other client
-                $debitMemoData = [
-                    'client_KEY' => $primaryClientKey,
+                $groupDistribution[] = [
+                    'client_KEY' => $clientKey,
+                    'client_name' => $clientData['client_name'] ?? 'group member',
                     'amount' => $clientAmount,
-                    'reference' => $memoReference,
-                    'comments' => 'Debit memo - payment to '.($clientData['client_name'] ?? 'group member'),
-                    'internal_comments' => json_encode([
-                        'source' => 'tr-pay',
-                        'transaction_id' => $paymentResult['transaction_id'],
-                        'original_payment_key' => $paymentLedgerKey,
-                        'memo_type' => 'debit',
-                        'to_client_KEY' => $clientKey,
-                        'to_client_name' => $clientData['client_name'] ?? '',
-                        'group_distribution' => true,
-                        'processed_at' => now()->toIso8601String(),
-                    ]),
-                    'staff_KEY' => $staffKey,
-                    'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
-                    'ledger_type_KEY' => config('practicecs.payment_integration.memo_types.debit'),
-                    'subtype_KEY' => config('practicecs.payment_integration.memo_subtypes.debit'),
-                    'invoices' => [],
+                    'invoices' => $invoicesToApply,
+                    'credit_memo' => [
+                        'client_KEY' => $clientKey,
+                        'amount' => $clientAmount,
+                        'comments' => 'Credit memo - payment from '.$primaryClientName,
+                        'internal_comments_data' => [
+                            'source' => 'tr-pay',
+                            'transaction_id' => $paymentResult['transaction_id'],
+                            'memo_type' => 'credit',
+                            'from_client_KEY' => $primaryClientKey,
+                            'from_client_name' => $primaryClientName,
+                            'group_distribution' => true,
+                        ],
+                        'staff_KEY' => $staffKey,
+                        'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
+                        'ledger_type_KEY' => config('practicecs.payment_integration.memo_types.credit'),
+                        'subtype_KEY' => config('practicecs.payment_integration.memo_subtypes.credit'),
+                    ],
+                    'debit_memo' => [
+                        'client_KEY' => $primaryClientKey,
+                        'amount' => $clientAmount,
+                        'comments' => 'Debit memo - payment to '.($clientData['client_name'] ?? 'group member'),
+                        'internal_comments_data' => [
+                            'source' => 'tr-pay',
+                            'transaction_id' => $paymentResult['transaction_id'],
+                            'memo_type' => 'debit',
+                            'to_client_KEY' => $clientKey,
+                            'to_client_name' => $clientData['client_name'] ?? '',
+                            'group_distribution' => true,
+                        ],
+                        'staff_KEY' => $staffKey,
+                        'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
+                        'ledger_type_KEY' => config('practicecs.payment_integration.memo_types.debit'),
+                        'subtype_KEY' => config('practicecs.payment_integration.memo_subtypes.debit'),
+                    ],
                 ];
-
-                $debitResult = $writer->writeMemo($debitMemoData, 'debit');
-
-                if (! $debitResult['success']) {
-                    throw new \Exception('Failed to create debit memo: '.($debitResult['error'] ?? 'Unknown error'));
-                }
-
-                $debitMemoLedgerKey = $debitResult['ledger_entry_KEY'];
-
-                Log::info('Debit memo created', [
-                    'client_KEY' => $primaryClientKey,
-                    'ledger_entry_KEY' => $debitMemoLedgerKey,
-                    'amount' => $clientAmount,
-                ]);
-
-                // Step 4d: Apply DEBIT MEMO to the PAYMENT
-                // This is the critical step - the debit memo must be applied to the payment
-                // just like an invoice is applied to a payment
-                DB::connection($connection)->insert('
-                    INSERT INTO Ledger_Entry_Application (
-                        update__staff_KEY,
-                        update_date_utc,
-                        from__ledger_entry_KEY,
-                        to__ledger_entry_KEY,
-                        applied_amount,
-                        create_date_utc
-                    )
-                    VALUES (?, GETUTCDATE(), ?, ?, ?, GETUTCDATE())
-                ', [
-                    $staffKey,
-                    $debitMemoLedgerKey,  // FROM = Debit Memo
-                    $paymentLedgerKey,     // TO = Payment
-                    $clientAmount,
-                ]);
-
-                Log::info('Debit memo applied to payment', [
-                    'debit_memo_KEY' => $debitMemoLedgerKey,
-                    'payment_KEY' => $paymentLedgerKey,
-                    'amount' => $clientAmount,
-                ]);
 
                 $distributedAmount += $clientAmount;
             }
 
-            Log::info('Client group distribution completed', [
-                'total_distributed' => $distributedAmount,
-                'memo_reference' => $memoReference,
-            ]);
+            $payload['group_distribution'] = $groupDistribution;
         }
+
+        return $payload;
+    }
+
+    /**
+     * Write payment to PracticeCS with client group support.
+     *
+     * Handles payments across client groups by:
+     * 1. Writing payment to primary client
+     * 2. Applying payment to primary client's invoices
+     * 3. Creating debit memo on primary client for overpayment
+     * 4. Creating credit memos on other group clients
+     * 5. Applying credit memos to other clients' invoices
+     */
+    protected function writeToPracticeCs(array $paymentResult): void
+    {
+        $writer = app(\App\Services\PracticeCsPaymentWriter::class);
+        $payload = $this->buildPracticeCsPayload($paymentResult);
+
+        $result = $writer->writeDeferredPayment($payload);
+
+        if (! $result['success']) {
+            throw new \Exception('PracticeCS payment write failed: '.($result['error'] ?? 'Unknown error'));
+        }
+
+        Log::info('Payment written to PracticeCS', [
+            'transaction_id' => $paymentResult['transaction_id'],
+            'ledger_entry_KEY' => $result['ledger_entry_KEY'],
+            'has_group_distribution' => isset($payload['group_distribution']),
+        ]);
     }
 
     /**

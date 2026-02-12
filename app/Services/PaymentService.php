@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\PaymentPlan;
+use App\Repositories\PaymentRepository;
 use App\Support\Money;
 use FoleyBridgeSolutions\KotapayCashier\Services\PaymentService as KotapayPaymentService;
 use FoleyBridgeSolutions\MiPaymentChoiceCashier\Exceptions\PaymentFailedException;
@@ -770,8 +771,16 @@ class PaymentService
             // Use Money class for all currency calculations (avoids floating-point errors)
             $invoiceAmount = Money::round((float) $planData['amount']);
             $planFee = Money::round((float) $planData['planFee']);
-            $totalAmount = Money::addDollars($invoiceAmount, $planFee);
+            $creditCardFee = Money::round((float) ($planData['creditCardFee'] ?? 0));
+            $totalAmount = Money::addDollars(Money::addDollars($invoiceAmount, $planFee), $creditCardFee);
             $durationMonths = (int) $planData['planDuration'];
+
+            // Calculate per-payment fee for informational tracking
+            // Total payments = 1 down payment + durationMonths installments (or just installments if no down payment)
+            $totalPaymentCount = $durationMonths + 1; // down payment + monthly installments
+            $feePerPayment = $creditCardFee > 0
+                ? Money::round($creditCardFee / $totalPaymentCount)
+                : 0.0;
 
             // Calculate down payment (custom or standard 30%)
             $customDownPayment = isset($planData['customDownPayment']) ? (float) $planData['customDownPayment'] : null;
@@ -815,6 +824,15 @@ class PaymentService
             }
 
             // Create the payment plan record
+            $recurringDay = isset($planData['recurringDay']) ? (int) $planData['recurringDay'] : null;
+            $recurringDay = $recurringDay ? max(1, min(31, $recurringDay)) : null;
+
+            // Calculate first payment date respecting custom recurring day
+            $firstPaymentDate = now()->addMonthNoOverflow();
+            if ($recurringDay) {
+                $firstPaymentDate->day(min($recurringDay, $firstPaymentDate->daysInMonth));
+            }
+
             $paymentPlan = PaymentPlan::create([
                 'customer_id' => $customer->id,
                 'client_id' => $clientInfo['client_id'],
@@ -825,6 +843,7 @@ class PaymentService
                 'down_payment' => $downPayment,
                 'monthly_payment' => $monthlyPayment,
                 'duration_months' => $durationMonths,
+                'recurring_payment_day' => $recurringDay,
                 'payment_method_token' => $paymentMethodToken,
                 'payment_method_type' => $paymentMethodType,
                 'payment_method_last_four' => $lastFour,
@@ -834,16 +853,23 @@ class PaymentService
                 'amount_paid' => $downPayment,
                 'amount_remaining' => $remainingBalance,
                 'start_date' => now(),
-                'next_payment_date' => now()->addMonth(),
+                'next_payment_date' => $firstPaymentDate,
                 'invoice_references' => $planData['invoices'] ?? [],
                 'metadata' => [
                     'payment_schedule' => $planData['paymentSchedule'] ?? [],
                     'client_name' => $clientInfo['client_name'] ?? null,
+                    'client_KEY' => $clientInfo['client_KEY'] ?? null,
                     'down_payment_transaction_id' => $downPaymentResult['transaction_id'] ?? null,
                     'down_payment_split' => $splitDownPayment,
                     'custom_down_payment' => $customDownPayment !== null,
+                    'credit_card_fee' => $creditCardFee,
+                    'fee_per_payment' => $feePerPayment,
+                    'recurring_payment_day' => $recurringDay,
                     'fee_waived' => $planFee == 0,
                     'created_at' => now()->toIso8601String(),
+                    'practicecs_invoices' => $planData['invoices'] ?? [],
+                    'practicecs_applied' => [],
+                    'practicecs_pending' => [],
                 ],
             ]);
 
@@ -854,13 +880,13 @@ class PaymentService
                     ? "Down payment for plan {$planId}"
                     : "Down payment (30%) for plan {$planId}";
 
-                Payment::create([
+                $downPaymentRecord = Payment::create([
                     'customer_id' => $customer->id,
                     'client_id' => $clientInfo['client_id'],
                     'payment_plan_id' => $paymentPlan->id,
                     'transaction_id' => $downPaymentResult['transaction_id'],
                     'amount' => $downPayment,
-                    'fee' => 0,
+                    'fee' => $feePerPayment,
                     'total_amount' => $downPayment,
                     'payment_method' => $paymentMethodType,
                     'payment_method_last_four' => $lastFour,
@@ -871,10 +897,23 @@ class PaymentService
                     'payment_vendor' => $isAchDownPayment ? ($downPaymentResult['payment_vendor'] ?? 'kotapay') : null,
                     'vendor_transaction_id' => $isAchDownPayment ? ($downPaymentResult['transaction_id'] ?? null) : null,
                 ]);
+
+                // Write down payment to PracticeCS (or defer for ACH)
+                if (config('practicecs.payment_integration.enabled')) {
+                    $this->writePlanPaymentToPracticeCs(
+                        $downPaymentRecord,
+                        $paymentPlan,
+                        $downPayment,
+                        $paymentMethodType,
+                        $clientInfo,
+                        $downPaymentResult['transaction_id'] ?? '',
+                        $downPaymentDescription
+                    );
+                }
             }
 
             // Create scheduled payment records for the remaining installments
-            $paymentPlan->createScheduledPayments();
+            $paymentPlan->createScheduledPayments($feePerPayment);
 
             DB::commit();
 
@@ -883,6 +922,7 @@ class PaymentService
                 'customer_id' => $customer->id,
                 'client_id' => $clientInfo['client_id'],
                 'total_amount' => $totalAmount,
+                'credit_card_fee' => $creditCardFee,
                 'down_payment' => $downPayment,
                 'remaining_balance' => $remainingBalance,
                 'duration_months' => $durationMonths,
@@ -912,8 +952,164 @@ class PaymentService
 
             return [
                 'success' => false,
-                'error' => 'Failed to create payment plan: '.$e->getMessage(),
+                'error' => $e->getMessage(),
             ];
+        }
+    }
+
+    /**
+     * Write a payment plan payment (down payment or installment) to PracticeCS.
+     *
+     * Allocates the payment amount sequentially across the plan's invoices,
+     * writes to PracticeCS immediately for cards, or stores the payload
+     * for deferred writing on ACH settlement.
+     *
+     * @param  Payment  $payment  The payment record
+     * @param  PaymentPlan  $paymentPlan  The payment plan
+     * @param  float  $amount  Payment amount to allocate
+     * @param  string  $paymentMethodType  'card' or 'ach'
+     * @param  array  $clientInfo  Client info with client_KEY
+     * @param  string  $transactionId  Gateway transaction ID
+     * @param  string  $description  Payment description for PracticeCS comments
+     */
+    protected function writePlanPaymentToPracticeCs(
+        Payment $payment,
+        PaymentPlan $paymentPlan,
+        float $amount,
+        string $paymentMethodType,
+        array $clientInfo,
+        string $transactionId,
+        string $description
+    ): void {
+        try {
+            $metadata = $paymentPlan->metadata ?? [];
+            $invoices = $metadata['practicecs_invoices'] ?? [];
+            $applied = $metadata['practicecs_applied'] ?? [];
+            $pending = $metadata['practicecs_pending'] ?? [];
+
+            // Resolve client_KEY — prefer clientInfo, fall back to plan metadata
+            $clientKey = $clientInfo['client_KEY']
+                ?? $metadata['client_KEY']
+                ?? null;
+
+            if (! $clientKey) {
+                $clientKey = app(PaymentRepository::class)->resolveClientKey($paymentPlan->client_id);
+            }
+
+            if (! $clientKey) {
+                Log::warning('PracticeCS: Cannot resolve client_KEY for plan payment, skipping', [
+                    'payment_id' => $payment->id,
+                    'plan_id' => $paymentPlan->plan_id,
+                    'client_id' => $paymentPlan->client_id,
+                ]);
+
+                return;
+            }
+
+            // Check if we have invoice data with ledger_entry_KEYs
+            $hasLedgerKeys = ! empty($invoices) && isset($invoices[0]['ledger_entry_KEY']);
+
+            if (! $hasLedgerKeys) {
+                Log::warning('PracticeCS: No ledger_entry_KEY data in plan invoices, skipping', [
+                    'payment_id' => $payment->id,
+                    'plan_id' => $paymentPlan->plan_id,
+                ]);
+
+                return;
+            }
+
+            // Allocate payment sequentially across invoices
+            $allocation = PracticeCsPaymentWriter::allocateToInvoices(
+                $invoices,
+                $amount,
+                $applied,
+                $pending
+            );
+
+            $invoicesToApply = $allocation['allocations'];
+            $increments = $allocation['increments'];
+
+            // Map payment method type to PracticeCS config keys
+            $methodConfigKey = $paymentMethodType === 'card' ? 'credit_card' : $paymentMethodType;
+
+            // Build the PracticeCS payload
+            $payload = [
+                'payment' => [
+                    'client_KEY' => $clientKey,
+                    'amount' => $amount,
+                    'reference' => $transactionId,
+                    'comments' => $description,
+                    'internal_comments' => json_encode([
+                        'source' => 'tr-pay',
+                        'transaction_id' => $transactionId,
+                        'payment_method' => $paymentMethodType,
+                        'plan_id' => $paymentPlan->plan_id,
+                        'payment_id' => $payment->id,
+                        'processed_at' => now()->toIso8601String(),
+                    ]),
+                    'staff_KEY' => config('practicecs.payment_integration.staff_key'),
+                    'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
+                    'ledger_type_KEY' => config("practicecs.payment_integration.ledger_types.{$methodConfigKey}"),
+                    'subtype_KEY' => config("practicecs.payment_integration.payment_subtypes.{$methodConfigKey}"),
+                    'invoices' => $invoicesToApply,
+                ],
+            ];
+
+            $isAch = $paymentMethodType === self::TYPE_ACH;
+
+            if ($isAch) {
+                // ACH: Store payload for deferred write on settlement
+                $paymentMetadata = $payment->metadata ?? [];
+                $paymentMetadata['practicecs_data'] = $payload;
+                $paymentMetadata['practicecs_increments'] = $increments;
+                $payment->update(['metadata' => $paymentMetadata]);
+
+                // Track pending amounts in plan metadata
+                PracticeCsPaymentWriter::updatePlanTracking($paymentPlan, $increments, 'practicecs_pending');
+
+                Log::info('PracticeCS: Plan payment deferred for ACH settlement', [
+                    'payment_id' => $payment->id,
+                    'plan_id' => $paymentPlan->plan_id,
+                    'amount' => $amount,
+                    'invoices_allocated' => count($invoicesToApply),
+                ]);
+            } else {
+                // Card: Write to PracticeCS immediately
+                $writer = app(PracticeCsPaymentWriter::class);
+                $result = $writer->writeDeferredPayment($payload);
+
+                if ($result['success']) {
+                    // Track applied amounts in plan metadata
+                    PracticeCsPaymentWriter::updatePlanTracking($paymentPlan, $increments, 'practicecs_applied');
+
+                    // Record PracticeCS write in payment metadata
+                    $paymentMetadata = $payment->metadata ?? [];
+                    $paymentMetadata['practicecs_written_at'] = now()->toIso8601String();
+                    $paymentMetadata['practicecs_ledger_entry_KEY'] = $result['ledger_entry_KEY'] ?? null;
+                    $payment->update(['metadata' => $paymentMetadata]);
+
+                    Log::info('PracticeCS: Plan payment written immediately (card)', [
+                        'payment_id' => $payment->id,
+                        'plan_id' => $paymentPlan->plan_id,
+                        'ledger_entry_KEY' => $result['ledger_entry_KEY'],
+                        'amount' => $amount,
+                    ]);
+                } else {
+                    Log::error('PracticeCS: Plan payment write failed', [
+                        'payment_id' => $payment->id,
+                        'plan_id' => $paymentPlan->plan_id,
+                        'error' => $result['error'] ?? 'Unknown error',
+                    ]);
+                }
+            }
+        } catch (\Exception $e) {
+            // Log but don't fail — payment already succeeded
+            Log::error('PracticeCS: Exception writing plan payment', [
+                'payment_id' => $payment->id,
+                'plan_id' => $paymentPlan->plan_id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
         }
     }
 

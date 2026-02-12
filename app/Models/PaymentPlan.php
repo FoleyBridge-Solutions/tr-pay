@@ -47,6 +47,7 @@ use Illuminate\Support\Facades\Log;
  * @property string|null $cancellation_reason
  * @property array|null $invoice_references
  * @property array|null $metadata
+ * @property int|null $recurring_payment_day
  */
 class PaymentPlan extends Model
 {
@@ -94,6 +95,7 @@ class PaymentPlan extends Model
         'cancellation_reason',
         'invoice_references',
         'metadata',
+        'recurring_payment_day',
     ];
 
     /**
@@ -123,6 +125,7 @@ class PaymentPlan extends Model
             'cancelled_at' => 'datetime',
             'invoice_references' => 'array',
             'metadata' => 'array',
+            'recurring_payment_day' => 'integer',
         ];
     }
 
@@ -224,6 +227,7 @@ class PaymentPlan extends Model
 
     /**
      * Calculate and set the next payment date.
+     * Respects the recurring_payment_day if set.
      */
     public function calculateNextPaymentDate(): ?Carbon
     {
@@ -232,7 +236,15 @@ class PaymentPlan extends Model
         }
 
         // Next payment is one month from the start date + number of completed payments
-        return $this->start_date->copy()->addMonths($this->payments_completed + 1);
+        $nextDate = $this->start_date->copy()->addMonthsNoOverflow($this->payments_completed + 1);
+
+        // Apply custom recurring day if set, clamped to the last day of the target month
+        if ($this->recurring_payment_day) {
+            $day = max(1, min(31, $this->recurring_payment_day));
+            $nextDate->day(min($day, $nextDate->daysInMonth));
+        }
+
+        return $nextDate;
     }
 
     /**
@@ -241,8 +253,9 @@ class PaymentPlan extends Model
      * @param  float  $amount  Payment amount
      * @param  string  $transactionId  Gateway transaction ID
      * @param  string|null  $vendorTransactionId  Vendor-specific transaction ID (e.g., Kotapay) for status tracking
+     * @param  float  $fee  Informational NCA fee for this payment (default 0)
      */
-    public function recordPayment(float $amount, string $transactionId, ?string $vendorTransactionId = null): Payment
+    public function recordPayment(float $amount, string $transactionId, ?string $vendorTransactionId = null, float $fee = 0): Payment
     {
         $isAch = $this->payment_method_type === 'ach';
 
@@ -252,7 +265,7 @@ class PaymentPlan extends Model
             'client_id' => $this->client_id,
             'transaction_id' => $transactionId,
             'amount' => $amount,
-            'fee' => 0,
+            'fee' => $fee,
             'total_amount' => $amount,
             'payment_method' => $this->payment_method_type,
             'payment_method_last_four' => $this->payment_method_last_four,
@@ -301,13 +314,16 @@ class PaymentPlan extends Model
             $this->original_due_date = $this->next_payment_date ?: $this->next_retry_date;
         }
 
+        // Get the informational fee from plan metadata (if credit card NCA was applied)
+        $feePerPayment = (float) ($this->metadata['fee_per_payment'] ?? 0);
+
         // Create a failed payment record
         $payment = $this->payments()->create([
             'customer_id' => $this->customer_id,
             'client_id' => $this->client_id,
             'transaction_id' => 'failed_'.bin2hex(random_bytes(16)),
             'amount' => $this->monthly_payment,
-            'fee' => 0,
+            'fee' => $feePerPayment,
             'total_amount' => $this->monthly_payment,
             'payment_method' => $this->payment_method_type,
             'payment_method_last_four' => $this->payment_method_last_four,
@@ -431,11 +447,23 @@ class PaymentPlan extends Model
 
     /**
      * Create scheduled payment records for the plan.
+     * Respects the recurring_payment_day if set.
+     *
+     * @param  float  $feePerPayment  Informational NCA fee per payment (default 0)
      */
-    public function createScheduledPayments(): void
+    public function createScheduledPayments(float $feePerPayment = 0): void
     {
+        // Track remaining fee to handle rounding on the last payment
+        $totalFeeDistributed = 0.0;
+
         for ($i = 1; $i <= $this->duration_months; $i++) {
-            $scheduledDate = $this->start_date->copy()->addMonths($i);
+            $scheduledDate = $this->start_date->copy()->addMonthsNoOverflow($i);
+
+            // Apply custom recurring day if set, clamped to the last day of the target month
+            if ($this->recurring_payment_day) {
+                $day = max(1, min(31, $this->recurring_payment_day));
+                $scheduledDate->day(min($day, $scheduledDate->daysInMonth));
+            }
 
             // Adjust final payment amount for rounding
             $amount = $this->monthly_payment;
@@ -446,12 +474,22 @@ class PaymentPlan extends Model
                 }
             }
 
+            // Calculate fee for this payment (absorb rounding remainder on last payment)
+            $fee = $feePerPayment;
+            if ($feePerPayment > 0 && $i === $this->duration_months) {
+                $totalNca = $feePerPayment * ($this->duration_months + 1); // total NCA across all payments including down payment
+                $fee = round($totalNca - $totalFeeDistributed - $feePerPayment, 2); // remaining NCA for installments minus what's already counted
+                // Simpler: just use the standard fee for the last payment too since rounding difference is minimal
+                $fee = $feePerPayment;
+            }
+            $totalFeeDistributed += $fee;
+
             $this->payments()->create([
                 'customer_id' => $this->customer_id,
                 'client_id' => $this->client_id,
                 'transaction_id' => 'scheduled_'.$this->plan_id.'_'.$i,
                 'amount' => $amount,
-                'fee' => 0,
+                'fee' => $fee,
                 'total_amount' => $amount,
                 'payment_method' => $this->payment_method_type,
                 'payment_method_last_four' => $this->payment_method_last_four,

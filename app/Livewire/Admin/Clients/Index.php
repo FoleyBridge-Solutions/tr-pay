@@ -12,7 +12,7 @@ use Livewire\Component;
  *
  * Search and view client information from PracticeCS.
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class Index extends Component
 {
     use SearchesClients;

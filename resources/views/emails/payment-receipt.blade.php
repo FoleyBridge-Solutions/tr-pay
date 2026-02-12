@@ -29,7 +29,7 @@
             <p><strong>Transaction ID:</strong> {{ $transactionId }}</p>
             <p><strong>Client:</strong> {{ $clientInfo['client_name'] }}</p>
             <p><strong>Client ID:</strong> {{ $clientInfo['client_id'] }}</p>
-            <p><strong>Payment Date:</strong> {{ now()->format('F j, Y \a\t g:i A') }}</p>
+            <p><strong>Payment Date:</strong> {{ now()->format('F j, Y \a\t g:i A T') }}</p>
 
             <div class="payment-details">
                 <h3>Payment Details</h3>

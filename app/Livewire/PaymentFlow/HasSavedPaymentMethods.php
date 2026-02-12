@@ -284,7 +284,7 @@ trait HasSavedPaymentMethods
             ]);
 
             // Record the payment with description and vendor metadata
-            $this->paymentService->recordPayment([
+            $payment = $this->paymentService->recordPayment([
                 'amount' => $this->paymentAmount,
                 'fee' => $this->creditCardFee,
                 'paymentMethod' => $this->paymentMethod,
@@ -299,9 +299,25 @@ trait HasSavedPaymentMethods
             // Write to PracticeCS if enabled
             if (config('practicecs.payment_integration.enabled')) {
                 try {
-                    $this->writeToPracticeCs($paymentResult);
+                    $isAchPayment = $this->paymentMethod === 'ach';
+
+                    if ($isAchPayment) {
+                        // ACH: Defer PracticeCS write until settlement is confirmed
+                        $practiceCsPayload = $this->buildPracticeCsPayload($paymentResult);
+                        $metadata = $payment->metadata ?? [];
+                        $metadata['practicecs_data'] = $practiceCsPayload;
+                        $payment->update(['metadata' => $metadata]);
+
+                        Log::info('ACH payment: PracticeCS write deferred until settlement', [
+                            'transaction_id' => $this->transactionId,
+                            'payment_id' => $payment->id,
+                        ]);
+                    } else {
+                        // Card payments: Write to PracticeCS immediately
+                        $this->writeToPracticeCs($paymentResult);
+                    }
                 } catch (\Exception $e) {
-                    Log::error('Failed to write payment to PracticeCS', [
+                    Log::error('Failed to handle PracticeCS write/deferral', [
                         'transaction_id' => $this->transactionId,
                         'error' => $e->getMessage(),
                     ]);

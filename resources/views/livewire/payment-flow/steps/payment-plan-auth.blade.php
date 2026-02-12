@@ -51,7 +51,7 @@
             <div class="prose prose-sm max-w-none text-zinc-700 dark:text-zinc-300 mb-6">
                 <p class="mb-3"><strong>Payment Plan Agreement:</strong></p>
                 <ul class="list-disc pl-5 space-y-1 mb-4">
-                    <li>You agree to pay the total amount of ${{ number_format($paymentAmount + $paymentPlanFee, 2) }} in {{ $planDuration }} monthly installments</li>
+                    <li>You agree to pay the total amount of ${{ number_format($paymentAmount + $creditCardFee + $paymentPlanFee, 2) }} in {{ $planDuration }} monthly installments</li>
                     <li>Payments will be automatically charged to your selected payment method on the due dates</li>
                     <li>Late payments may incur additional fees and interest charges</li>
                     <li>You may cancel this payment plan at any time, but all outstanding amounts become due immediately</li>
@@ -105,7 +105,7 @@
 
             {{-- Credit Card Form --}}
             @if($paymentMethod === 'credit_card')
-                <div class="space-y-4">
+                <div wire:key="payment-fields-card" class="space-y-4">
                     <flux:field>
                         <flux:label>Card Number</flux:label>
                         <flux:input wire:model.live="cardNumber" placeholder="1234 5678 9012 3456" maxlength="19" />
@@ -129,7 +129,7 @@
                 </div>
             @elseif($paymentMethod === 'ach')
                 {{-- ACH Bank Account Form --}}
-                <div class="space-y-4">
+                <div wire:key="payment-fields-ach" class="space-y-4">
                     <flux:field>
                         <flux:label>Bank Name</flux:label>
                         <flux:input wire:model="bankName" placeholder="First National Bank" />

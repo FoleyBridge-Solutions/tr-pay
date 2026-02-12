@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Admin\Clients;
 
+use App\Models\Ach\AchEntry;
 use App\Models\Customer;
 use App\Models\CustomerPaymentMethod;
 use App\Models\Payment;
@@ -22,7 +23,7 @@ use Livewire\Component;
  *
  * Displays detailed information for a single client from PracticeCS.
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class Show extends Component
 {
     public string $clientId;
@@ -47,6 +48,23 @@ class Show extends Component
 
     public bool $retrying = false;
 
+    public bool $editingClientId = false;
+
+    public string $newClientId = '';
+
+    /**
+     * The ID of the recurring payment being assigned a method.
+     */
+    public ?int $assigningRecurringPaymentId = null;
+
+    /**
+     * Pre-formatted data for the assign payment method modal.
+     * Uses the Alpine $wire reactive getter pattern to bypass Flux modal morph issues.
+     *
+     * @var array{recurring_id: int, recurring_amount: string, recurring_frequency: string, methods: array}
+     */
+    public array $assignModalDetails = [];
+
     protected PaymentRepository $paymentRepo;
 
     protected CustomerPaymentMethodService $paymentMethodService;
@@ -55,10 +73,6 @@ class Show extends Component
     {
         $this->paymentRepo = $paymentRepo;
         $this->paymentMethodService = $paymentMethodService;
-        $this->paymentMethods = collect();
-        $this->payments = collect();
-        $this->recurringPayments = collect();
-        $this->paymentPlans = collect();
     }
 
     /**
@@ -67,6 +81,10 @@ class Show extends Component
     public function mount(string $clientId): void
     {
         $this->clientId = $clientId;
+        $this->paymentMethods = collect();
+        $this->payments = collect();
+        $this->recurringPayments = collect();
+        $this->paymentPlans = collect();
         $this->loadClient();
     }
 
@@ -157,6 +175,100 @@ class Show extends Component
         $this->loadPayments();
         $this->loadRecurringPayments();
         $this->loadPaymentPlans();
+    }
+
+    /**
+     * Start editing the client ID.
+     */
+    public function startEditingClientId(): void
+    {
+        $this->newClientId = $this->clientId;
+        $this->editingClientId = true;
+    }
+
+    /**
+     * Cancel editing the client ID.
+     */
+    public function cancelEditingClientId(): void
+    {
+        $this->editingClientId = false;
+        $this->newClientId = '';
+        $this->resetValidation('newClientId');
+    }
+
+    /**
+     * Update the client ID across all local database tables.
+     *
+     * Updates the client_id in: customers, payments, recurring_payments,
+     * payment_plans, and ach_entries tables within a database transaction.
+     * Redirects to the new client URL after successful update.
+     */
+    public function updateClientId(): void
+    {
+        $this->validate([
+            'newClientId' => ['required', 'string', 'max:50'],
+        ]);
+
+        $newId = trim($this->newClientId);
+
+        if ($newId === $this->clientId) {
+            $this->cancelEditingClientId();
+
+            return;
+        }
+
+        // Check if the new client ID already has local records (would cause conflicts)
+        $existingCustomer = Customer::where('client_id', $newId)->first();
+        $currentCustomer = Customer::where('client_id', $this->clientId)->first();
+
+        if ($existingCustomer && $currentCustomer && $existingCustomer->id !== $currentCustomer->id) {
+            $this->addError('newClientId', 'Another customer already exists with this client ID.');
+
+            return;
+        }
+
+        try {
+            DB::transaction(function () use ($newId) {
+                $oldId = $this->clientId;
+
+                // Update customers table
+                Customer::where('client_id', $oldId)
+                    ->update(['client_id' => $newId]);
+
+                // Update payments table
+                Payment::where('client_id', $oldId)
+                    ->update(['client_id' => $newId]);
+
+                // Update recurring_payments table
+                RecurringPayment::where('client_id', $oldId)
+                    ->update(['client_id' => $newId]);
+
+                // Update payment_plans table
+                PaymentPlan::where('client_id', $oldId)
+                    ->update(['client_id' => $newId]);
+
+                // Update ach_entries table
+                AchEntry::where('client_id', $oldId)
+                    ->update(['client_id' => $newId]);
+
+                Log::info('Client ID updated across all local tables', [
+                    'old_client_id' => $oldId,
+                    'new_client_id' => $newId,
+                ]);
+            });
+
+            session()->flash('success', "Client ID updated from \"{$this->clientId}\" to \"{$newId}\".");
+
+            $this->redirect(route('admin.clients.show', ['clientId' => $newId]), navigate: true);
+        } catch (\Exception $e) {
+            Log::error('Failed to update client ID', [
+                'old_client_id' => $this->clientId,
+                'new_client_id' => $newId,
+                'error' => $e->getMessage(),
+            ]);
+
+            $this->addError('newClientId', 'Failed to update client ID. Please try again.');
+        }
     }
 
     /**
@@ -341,6 +453,168 @@ class Show extends Component
         } finally {
             $this->retrying = false;
         }
+    }
+
+    /**
+     * Open the assign payment method modal for a recurring payment.
+     *
+     * Formats the available payment methods into a plain array for the Alpine $wire
+     * reactive getter pattern (bypasses Flux modal wire:ignore.self morph issue).
+     *
+     * @param  int  $recurringPaymentId  The recurring payment to assign a method to
+     */
+    public function openAssignMethodModal(int $recurringPaymentId): void
+    {
+        $recurring = RecurringPayment::find($recurringPaymentId);
+
+        if (! $recurring || $recurring->client_id !== $this->clientId) {
+            Flux::toast('Recurring payment not found.', variant: 'danger');
+
+            return;
+        }
+
+        if (! empty($recurring->payment_method_token)) {
+            Flux::toast('This recurring payment already has a payment method assigned.', variant: 'warning');
+
+            return;
+        }
+
+        $this->assigningRecurringPaymentId = $recurringPaymentId;
+        $this->assignModalDetails = $this->formatAssignModalDetails($recurring);
+
+        $this->modal('assign-payment-method')->show();
+    }
+
+    /**
+     * Format the assign modal details for Alpine consumption.
+     *
+     * @return array{recurring_id: int, recurring_amount: string, recurring_frequency: string, methods: array}
+     */
+    protected function formatAssignModalDetails(RecurringPayment $recurring): array
+    {
+        // Re-query payment methods from the database to ensure we have fresh
+        // Eloquent models with accessors/methods (Livewire's dehydration/rehydration
+        // of Collection properties can strip model functionality).
+        $customer = Customer::where('client_id', $this->clientId)->first();
+        $freshMethods = $customer
+            ? CustomerPaymentMethod::where('customer_id', $customer->id)->get()
+            : collect();
+
+        $methods = [];
+
+        foreach ($freshMethods as $method) {
+            // Skip expired cards
+            if ($method->isExpired()) {
+                continue;
+            }
+
+            $methods[] = [
+                'id' => $method->id,
+                'type' => $method->type,
+                'display_name' => $method->display_name,
+                'is_default' => $method->is_default,
+                'last_four' => $method->last_four,
+                'brand' => $method->brand,
+                'bank_name' => $method->bank_name,
+                'exp_display' => $method->expiration_display,
+                'is_expiring_soon' => $method->isExpiringSoon(),
+            ];
+        }
+
+        return [
+            'recurring_id' => $recurring->id,
+            'recurring_amount' => number_format($recurring->amount, 2),
+            'recurring_frequency' => $recurring->frequency_label,
+            'recurring_description' => $recurring->description ?? '',
+            'methods' => $methods,
+        ];
+    }
+
+    /**
+     * Assign a saved payment method to the recurring payment.
+     *
+     * Updates the recurring payment with the chosen method's token, type, and last four.
+     * Also links the customer_id if not already set, and activates pending payments.
+     *
+     * @param  int  $methodId  The CustomerPaymentMethod ID to assign
+     */
+    public function assignPaymentMethod(int $methodId): void
+    {
+        $recurring = RecurringPayment::find($this->assigningRecurringPaymentId);
+
+        if (! $recurring || $recurring->client_id !== $this->clientId) {
+            Flux::toast('Recurring payment not found.', variant: 'danger');
+            $this->closeAssignModal();
+
+            return;
+        }
+
+        $method = CustomerPaymentMethod::find($methodId);
+
+        if (! $method) {
+            Flux::toast('Payment method not found.', variant: 'danger');
+
+            return;
+        }
+
+        // Verify the method belongs to a customer for this client
+        $customer = Customer::where('client_id', $this->clientId)->first();
+
+        if (! $customer || $method->customer_id !== $customer->id) {
+            Flux::toast('Payment method does not belong to this client.', variant: 'danger');
+
+            return;
+        }
+
+        if ($method->isExpired()) {
+            Flux::toast('Cannot assign an expired payment method.', variant: 'danger');
+
+            return;
+        }
+
+        try {
+            // Update the recurring payment with the chosen method
+            $recurring->payment_method_token = $method->mpc_token;
+            $recurring->payment_method_type = $method->type;
+            $recurring->payment_method_last_four = $method->last_four;
+
+            // Link customer_id if not already set
+            if (! $recurring->customer_id) {
+                $recurring->customer_id = $customer->id;
+            }
+
+            // Activate if currently pending
+            if ($recurring->status === RecurringPayment::STATUS_PENDING) {
+                $recurring->status = RecurringPayment::STATUS_ACTIVE;
+            }
+
+            $recurring->save();
+
+            $this->closeAssignModal();
+            $this->loadRecurringPayments();
+            $this->loadPaymentMethods();
+
+            Flux::toast('Payment method assigned successfully.', variant: 'success');
+        } catch (\Exception $e) {
+            Log::error('Failed to assign payment method to recurring payment', [
+                'recurring_payment_id' => $recurring->id,
+                'method_id' => $methodId,
+                'client_id' => $this->clientId,
+                'error' => $e->getMessage(),
+            ]);
+
+            Flux::toast('Failed to assign payment method.', variant: 'danger');
+        }
+    }
+
+    /**
+     * Close the assign payment method modal and reset state.
+     */
+    public function closeAssignModal(): void
+    {
+        $this->assigningRecurringPaymentId = null;
+        $this->assignModalDetails = [];
+        $this->modal('assign-payment-method')->close();
     }
 
     public function render()

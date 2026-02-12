@@ -2,6 +2,10 @@
     <div class="mb-8">
         <flux:heading size="xl">Dashboard</flux:heading>
         <flux:subheading>Welcome back, {{ Auth::user()->name }}</flux:subheading>
+        <div class="mt-2 flex items-center gap-2 text-xs text-zinc-400">
+            <flux:icon name="clock" class="w-3.5 h-3.5" />
+            <local-time datetime="{{ now()->toIso8601String() }}" format="datetime"></local-time>
+        </div>
     </div>
 
     {{-- Stats Grid --}}
@@ -122,7 +126,7 @@
                                         @endif
                                     </flux:table.cell>
                                     <flux:table.cell class="text-zinc-500">
-                                        {{ $payment->created_at->format('M j, g:i A') }}
+                                        <local-time datetime="{{ $payment->created_at->toIso8601String() }}" format="short"></local-time>
                                     </flux:table.cell>
                                 </flux:table.row>
                             @endforeach

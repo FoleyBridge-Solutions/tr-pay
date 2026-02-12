@@ -44,7 +44,7 @@
                         </span>
                         @if($createdPayment->next_payment_date)
                             <span class="text-zinc-500">Next Payment:</span>
-                            <span>{{ $createdPayment->next_payment_date->format('M j, Y') }}</span>
+                            <span><local-time datetime="{{ $createdPayment->next_payment_date->toIso8601String() }}" format="date"></local-time></span>
                         @endif
                     </div>
                 </div>
@@ -215,7 +215,7 @@
                         </div>
 
                         @if($paymentMethodType === 'card')
-                            <div class="space-y-4">
+                            <div wire:key="payment-fields-card" class="space-y-4">
                                 <flux:field>
                                     <flux:label>Card Number</flux:label>
                                     <flux:input wire:model="cardNumber" placeholder="1234 5678 9012 3456" />
@@ -240,7 +240,7 @@
                                 </flux:field>
                             </div>
                         @elseif($paymentMethodType === 'ach')
-                            <div class="space-y-4">
+                            <div wire:key="payment-fields-ach" class="space-y-4">
                                 <flux:field>
                                     <flux:label>Account Holder Name (Optional)</flux:label>
                                     <flux:input wire:model="accountName" placeholder="John Doe" />
@@ -267,7 +267,7 @@
                                 </flux:field>
                             </div>
                         @elseif($paymentMethodType === 'saved')
-                            <div class="space-y-3">
+                            <div wire:key="payment-fields-saved" class="space-y-3">
                                 @if($savedPaymentMethods->count() === 0)
                                     <div class="text-center py-8 text-zinc-500">
                                         <flux:icon name="credit-card" class="w-12 h-12 mx-auto mb-2 opacity-50" />

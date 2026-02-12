@@ -15,7 +15,7 @@ use Livewire\WithFileUploads;
  *
  * Handles CSV file upload and import of recurring payments.
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class Import extends Component
 {
     use WithFileUploads;

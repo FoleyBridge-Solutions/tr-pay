@@ -71,8 +71,8 @@
                     @foreach($activities as $activity)
                         <flux:table.row wire:key="activity-{{ $activity->id }}">
                             <flux:table.cell class="text-zinc-500 whitespace-nowrap">
-                                <div class="text-sm">{{ $activity->created_at->format('M j, Y') }}</div>
-                                <div class="text-xs text-zinc-400">{{ $activity->created_at->format('g:i:s A') }}</div>
+                                <div class="text-sm"><local-time datetime="{{ $activity->created_at->toIso8601String() }}" format="date"></local-time></div>
+                                <div class="text-xs text-zinc-400"><local-time datetime="{{ $activity->created_at->toIso8601String() }}" format="time"></local-time></div>
                             </flux:table.cell>
                             <flux:table.cell>
                                 @if($activity->user)

@@ -25,11 +25,11 @@ use Livewire\Component;
  * Steps:
  * 1. Search and select client
  * 2. Select invoices to include
- * 3. Configure plan (duration, fees)
- * 4. Enter payment method
+ * 3. Enter payment method (card or ACH)
+ * 4. Configure plan (duration, fees, down payment)
  * 5. Review and confirm
  */
-#[Layout('layouts.admin')]
+#[Layout('layouts::admin')]
 class Create extends Component
 {
     use HasInvoiceManagement;
@@ -55,24 +55,7 @@ class Create extends Component
 
     public array $selectedInvoices = [];
 
-    // Step 3: Plan Configuration
-    public int $planDuration = 3; // 3, 6, or 9 months
-
-    public float $planFee = 0;
-
-    public float $invoiceTotal = 0;
-
-    public float $totalAmount = 0;
-
-    public float $downPayment = 0; // 30% down payment
-
-    public float $monthlyPayment = 0;
-
-    public bool $splitDownPayment = false; // Admin option to split into two payments
-
-    public array $splitPaymentDetails = []; // Details of split payments
-
-    // Step 4: Payment Method
+    // Step 3: Payment Method
     public string $paymentMethodType = CustomerPaymentMethod::TYPE_CARD; // 'card' or 'ach'
 
     public string $cardNumber = '';
@@ -90,6 +73,33 @@ class Create extends Component
     public string $accountName = '';
 
     public string $accountType = 'checking';
+
+    // Step 4: Plan Configuration
+    public int $planDuration = 3; // 3, 6, or 9 months
+
+    public float $planFee = 0;
+
+    public float $invoiceTotal = 0;
+
+    public float $creditCardFee = 0; // NCA fee (4% of invoice + plan fee) for credit card payments
+
+    public float $totalAmount = 0;
+
+    public float $downPayment = 0; // 30% down payment
+
+    public float $monthlyPayment = 0;
+
+    public bool $splitDownPayment = false; // Admin option to split into two payments
+
+    public array $splitPaymentDetails = []; // Details of split payments
+
+    public bool $waivePlanFee = false; // Admin option to waive the plan fee
+
+    public bool $useCustomDownPayment = false; // Admin option to set a custom down payment
+
+    public string $customDownPaymentAmount = ''; // Custom down payment dollar amount
+
+    public ?int $recurringDay = null; // Admin option to set a custom day-of-month for recurring payments
 
     // Step 5: Review
     public bool $confirmed = false;
@@ -165,7 +175,8 @@ class Create extends Component
 
     /**
      * Calculate plan totals based on selected invoices and duration.
-     * Includes 30% down payment calculation.
+     * Supports admin overrides for fee waiver and custom down payment.
+     * Includes credit card NCA fee when payment method is card.
      */
     public function calculateTotals(): void
     {
@@ -178,32 +189,63 @@ class Create extends Component
         }
         $this->invoiceTotal = Money::toDollars($invoiceTotalCents);
 
-        // Get plan fee from config
-        $fees = config('payment-fees.payment_plan_fees', [3 => 150, 6 => 300, 9 => 450]);
-        $this->planFee = $fees[$this->planDuration] ?? 0;
+        // Get plan fee (waived or from config)
+        if ($this->waivePlanFee) {
+            $this->planFee = 0;
+        } else {
+            $fees = config('payment-fees.payment_plan_fees', [3 => 150, 6 => 300, 9 => 450]);
+            $this->planFee = $fees[$this->planDuration] ?? 0;
+        }
 
-        // Calculate totals
-        $this->totalAmount = Money::addDollars($this->invoiceTotal, $this->planFee);
+        // Calculate credit card NCA fee (4% of invoice + plan fee)
+        $subtotal = Money::addDollars($this->invoiceTotal, $this->planFee);
+        $this->creditCardFee = $this->getCreditCardFeeRate() > 0
+            ? Money::round($subtotal * $this->getCreditCardFeeRate())
+            : 0;
 
-        // Calculate 30% down payment
-        $this->downPayment = Money::multiplyDollars($this->totalAmount, PaymentPlanCalculator::DOWN_PAYMENT_PERCENT);
+        // Calculate totals (invoice + plan fee + NCA)
+        $this->totalAmount = Money::addDollars($subtotal, $this->creditCardFee);
+
+        // Calculate down payment (custom or 30%)
+        if ($this->useCustomDownPayment && $this->customDownPaymentAmount !== '') {
+            $customAmount = (float) $this->customDownPaymentAmount;
+            // Clamp to [0, totalAmount]
+            $this->downPayment = Money::round(max(0, min($customAmount, $this->totalAmount)));
+        } else {
+            $this->downPayment = Money::multiplyDollars($this->totalAmount, PaymentPlanCalculator::DOWN_PAYMENT_PERCENT);
+        }
 
         // Calculate monthly payment on remaining balance
         $remainingBalance = Money::subtractDollars($this->totalAmount, $this->downPayment);
-        $this->monthlyPayment = $this->planDuration > 0
+        $this->monthlyPayment = $this->planDuration > 0 && $remainingBalance > 0
             ? Money::round($remainingBalance / $this->planDuration)
             : 0;
 
-        // Update split payment details if enabled
+        // Update split payment details if enabled (only for standard 30% down payment)
         $this->updateSplitPaymentDetails();
     }
 
     /**
+     * Get the credit card NCA fee rate based on the selected payment method.
+     *
+     * @return float The fee rate (e.g. 0.04 for 4%) or 0 if not applicable
+     */
+    protected function getCreditCardFeeRate(): float
+    {
+        if ($this->paymentMethodType === CustomerPaymentMethod::TYPE_CARD) {
+            return (float) config('payment-fees.credit_card_rate', 0);
+        }
+
+        return 0.0;
+    }
+
+    /**
      * Update split down payment details.
+     * Split is disabled when using a custom down payment amount.
      */
     protected function updateSplitPaymentDetails(): void
     {
-        if (! $this->splitDownPayment || $this->downPayment <= 0) {
+        if (! $this->splitDownPayment || $this->downPayment <= 0 || $this->useCustomDownPayment) {
             $this->splitPaymentDetails = [];
 
             return;
@@ -227,6 +269,55 @@ class Create extends Component
     public function updatedPlanDuration(): void
     {
         $this->calculateTotals();
+    }
+
+    /**
+     * Recalculate when fee waiver is toggled.
+     */
+    public function updatedWaivePlanFee(): void
+    {
+        $this->calculateTotals();
+    }
+
+    /**
+     * Handle custom down payment toggle.
+     * Resets the custom amount and disables split when toggled off.
+     */
+    public function updatedUseCustomDownPayment(): void
+    {
+        if (! $this->useCustomDownPayment) {
+            $this->customDownPaymentAmount = '';
+            $this->splitDownPayment = false;
+        }
+        $this->calculateTotals();
+    }
+
+    /**
+     * Recalculate when custom down payment amount changes.
+     */
+    public function updatedCustomDownPaymentAmount(): void
+    {
+        $this->calculateTotals();
+    }
+
+    /**
+     * Recalculate totals when payment method type changes (card vs ACH).
+     * NCA fee only applies to credit card payments.
+     */
+    public function updatedPaymentMethodType(): void
+    {
+        $this->calculateTotals();
+    }
+
+    /**
+     * Recalculate schedule when recurring payment day changes.
+     */
+    public function updatedRecurringDay(): void
+    {
+        // Clamp to valid day range (1-31) or null for default
+        if ($this->recurringDay !== null) {
+            $this->recurringDay = max(1, min(31, $this->recurringDay));
+        }
     }
 
     /**
@@ -304,15 +395,18 @@ class Create extends Component
                 break;
 
             case 3:
-                if ($this->invoiceTotal <= 0) {
-                    $this->errorMessage = 'Invoice total must be greater than zero.';
-
+                if (! $this->validatePaymentMethod()) {
                     return false;
                 }
+                // Recalculate totals now that payment method is confirmed
+                // (NCA fee depends on card vs ACH)
+                $this->calculateTotals();
                 break;
 
             case 4:
-                if (! $this->validatePaymentMethod()) {
+                if ($this->invoiceTotal <= 0) {
+                    $this->errorMessage = 'Invoice total must be greater than zero.';
+
                     return false;
                 }
                 break;
@@ -349,9 +443,14 @@ class Create extends Component
             $planData = [
                 'amount' => $this->invoiceTotal,
                 'planFee' => $this->planFee,
+                'creditCardFee' => $this->creditCardFee,
                 'planDuration' => $this->planDuration,
                 'invoices' => array_values($selectedInvoiceDetails),
                 'paymentSchedule' => $this->generatePaymentSchedule(),
+                'customDownPayment' => $this->useCustomDownPayment && $this->customDownPaymentAmount !== ''
+                    ? max(0, (float) $this->customDownPaymentAmount)
+                    : null,
+                'recurringDay' => $this->recurringDay,
             ];
 
             // Prepare client info
@@ -395,7 +494,11 @@ class Create extends Component
 
             if ($result['success']) {
                 $this->createdPlanId = $result['plan_id'];
-                $this->successMessage = 'Payment plan created successfully! Down payment of $'.number_format($result['down_payment'], 2).' has been charged.';
+                if ($result['down_payment'] > 0) {
+                    $this->successMessage = 'Payment plan created successfully! Down payment of $'.number_format($result['down_payment'], 2).' has been charged.';
+                } else {
+                    $this->successMessage = 'Payment plan created successfully! No down payment was charged.';
+                }
                 $this->currentStep = 6; // Success step
 
                 // Log the activity
@@ -409,13 +512,17 @@ class Create extends Component
                         'client_name' => $this->selectedClient['client_name'],
                         'invoice_total' => $this->invoiceTotal,
                         'plan_fee' => $this->planFee,
+                        'credit_card_fee' => $this->creditCardFee,
+                        'fee_waived' => $this->waivePlanFee,
                         'total_amount' => $this->totalAmount,
                         'down_payment' => $result['down_payment'],
+                        'custom_down_payment' => $this->useCustomDownPayment,
                         'monthly_payment' => $this->monthlyPayment,
                         'duration_months' => $this->planDuration,
                         'payment_method' => $this->paymentMethodType,
                         'payment_method_last_four' => $lastFour,
                         'split_down_payment' => $this->splitDownPayment,
+                        'recurring_day' => $this->recurringDay,
                         'invoice_count' => count($this->selectedInvoices),
                         'invoice_keys' => $this->selectedInvoices,
                     ]
@@ -445,16 +552,26 @@ class Create extends Component
 
     /**
      * Generate the payment schedule including down payment.
+     * Passes admin overrides for fee, down payment, recurring day, and credit card fee rate to the calculator.
      */
     protected function generatePaymentSchedule(): array
     {
         $calculator = new PaymentPlanCalculator;
 
+        $customFee = $this->waivePlanFee ? 0.0 : null;
+        $customDownPayment = $this->useCustomDownPayment && $this->customDownPaymentAmount !== ''
+            ? max(0, (float) $this->customDownPaymentAmount)
+            : null;
+
         return $calculator->calculateSchedule(
             $this->invoiceTotal,
             $this->planDuration,
             null,
-            $this->splitDownPayment
+            $this->splitDownPayment && ! $this->useCustomDownPayment,
+            $customFee,
+            $customDownPayment,
+            $this->recurringDay,
+            $this->getCreditCardFeeRate()
         );
     }
 

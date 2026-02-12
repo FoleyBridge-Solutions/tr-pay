@@ -46,7 +46,6 @@ class KotapayTestCommand extends Command
         $this->newLine();
 
         $this->line('Available commands:');
-        $this->line('  kotapay:upload {file_id}     - Upload an ACH file to Kotapay');
         $this->line('  kotapay:report               - Get File Acknowledgement Report');
 
         return Command::SUCCESS;
