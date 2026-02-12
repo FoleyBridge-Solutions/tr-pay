@@ -13,13 +13,14 @@ use App\Livewire\PaymentFlow\Steps;
 use App\Models\CustomerPaymentMethod;
 use App\Repositories\PaymentRepository;
 use App\Services\CustomerPaymentMethodService;
+use App\Services\PaymentOrchestrator;
+use App\Services\PaymentOrchestrator\ProcessPaymentCommand;
 use App\Services\PaymentPlanCalculator;
 use App\Services\PaymentService;
 use App\Support\Money;
 use Flux\Flux;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -579,64 +580,23 @@ class PaymentFlow extends Component
                     $this->transactionId = $paymentResult['plan_id'];
                 }
             } else {
-                // For one-time payments, process immediately
-                if ($this->paymentMethod === 'credit_card') {
-                    // Create QuickPayments token and charge
-                    $cardData = [
-                        'number' => str_replace(' ', '', $this->cardNumber),
-                        'exp_month' => (int) substr($this->cardExpiry, 0, 2),
-                        'exp_year' => (int) ('20'.substr($this->cardExpiry, 3, 2)),
-                        'cvc' => $this->cardCvv,
-                        'name' => $this->clientInfo['client_name'],
-                        'street' => '',
-                        'zip_code' => '',
-                        'email' => $this->clientInfo['email'] ?? '',
-                    ];
+                // One-time payment: delegate to PaymentOrchestrator
+                $orchestrator = app(PaymentOrchestrator::class);
+                $command = $this->buildOrchestratorCommand($customer);
+                $result = $orchestrator->processPayment($command);
 
-                    Log::info('Creating QP token with card data', [
-                        'last_four' => substr($cardData['number'], -4),
-                        'exp_month' => $cardData['exp_month'],
-                        'exp_year' => $cardData['exp_year'],
-                        'has_cvv' => ! empty($cardData['cvc']),
-                        'name' => $cardData['name'],
-                    ]);
+                if (! $result->success) {
+                    $this->addError('payment', $result->error ?? 'Payment processing failed');
+                    $this->transactionId = null;
 
-                    $qpToken = $customer->createQuickPaymentsToken($cardData);
-
-                    $paymentResult = $this->paymentService->chargeWithQuickPayments(
-                        $customer,
-                        $qpToken,
-                        $this->paymentAmount + $this->creditCardFee,
-                        [
-                            'description' => "Payment for {$this->clientInfo['client_name']} - ".count($this->selectedInvoices).' invoice(s)',
-                        ]
-                    );
-                } elseif ($this->paymentMethod === 'ach') {
-                    // Process ACH payment via Kotapay
-                    $paymentResult = $this->paymentService->chargeAchWithKotapay(
-                        $customer,
-                        [
-                            'routing_number' => $this->routingNumber,
-                            'account_number' => $this->accountNumber,
-                            'account_type' => ucfirst($this->bankAccountType),
-                            'account_name' => $this->clientInfo['client_name'],
-                            'is_business' => (bool) $this->isBusiness,
-                        ],
-                        $this->paymentAmount,
-                        [
-                            'description' => "ACH Payment for {$this->clientInfo['client_name']} - ".count($this->selectedInvoices).' invoice(s)',
-                        ]
-                    );
-                } else {
-                    // For check payments, log for manual processing
-                    $paymentResult = [
-                        'success' => true,
-                        'transaction_id' => $this->transactionId,
-                        'amount' => $this->paymentAmount,
-                        'status' => 'pending_check',
-                        'message' => 'Check payment logged for manual processing',
-                    ];
+                    return;
                 }
+
+                $this->transactionId = $result->transactionId;
+                $this->paymentProcessed = true;
+                $this->currentStep = Steps::CONFIRMATION;
+
+                return;
             }
 
             if (! $paymentResult || ! $paymentResult['success']) {
@@ -648,124 +608,14 @@ class PaymentFlow extends Component
                     'client_id' => $this->clientInfo['client_id'],
                 ]);
 
-                // Clear transaction ID on failure so next attempt gets a fresh one
                 $this->transactionId = null;
 
                 return;
             }
 
-            // Log successful payment
-            Log::info('Payment processed successfully', [
-                'transaction_id' => $this->transactionId,
-                'client_id' => $this->clientInfo['client_id'],
-                'amount' => $paymentData['amount'],
-                'payment_method' => $this->paymentMethod,
-                'is_payment_plan' => $this->isPaymentPlan,
-            ]);
-
-            // Record payment to database (for one-time payments only - payment plans are recorded in createPaymentPlan)
-            if (! $this->isPaymentPlan) {
-                $lastFour = $this->paymentMethod === 'credit_card'
-                    ? substr(str_replace(' ', '', $this->cardNumber), -4)
-                    : substr($this->accountNumber, -4);
-
-                $payment = $this->paymentService->recordPayment([
-                    'amount' => $this->paymentAmount,
-                    'fee' => $this->creditCardFee,
-                    'paymentMethod' => $this->paymentMethod,
-                    'lastFour' => $lastFour,
-                    'invoices' => $this->selectedInvoices,
-                    'description' => "Payment for {$this->clientInfo['client_name']} - ".count($this->selectedInvoices).' invoice(s)',
-                ], $this->clientInfo, $this->transactionId, [
-                    'payment_vendor' => $paymentResult['payment_vendor'] ?? null,
-                    'vendor_transaction_id' => $paymentResult['transaction_id'] ?? null,
-                ]);
-            }
-
-            // Save payment method if requested (only for one-time payments with new card/bank)
-            if ($this->savePaymentMethod && ! $this->isPaymentPlan && ! $this->selectedSavedMethodId) {
-                try {
-                    if ($this->paymentMethod === 'credit_card') {
-                        // For cards, create reusable token from the successful transaction using PnRef
-                        $pnRef = $paymentResult['response']['PnRef'] ?? null;
-
-                        if ($pnRef) {
-                            $tokenResponse = $customer->tokenizeFromTransaction((int) $pnRef);
-
-                            if (isset($tokenResponse['CardToken']['Token'])) {
-                                $token = $tokenResponse['CardToken']['Token'];
-                                $this->saveCurrentPaymentMethod($token, CustomerPaymentMethod::TYPE_CARD);
-                                Log::info('Card payment method saved from transaction', [
-                                    'pnRef' => $pnRef,
-                                ]);
-                            } else {
-                                Log::warning('Could not extract card token from transaction response', [
-                                    'pnRef' => $pnRef,
-                                    'tokenResponse' => $tokenResponse,
-                                ]);
-                            }
-                        } else {
-                            Log::warning('No PnRef in payment result, cannot save card payment method');
-                        }
-                    } elseif ($this->paymentMethod === 'ach') {
-                        // For ACH, Kotapay doesn't support tokenization from transactions
-                        // Generate a local pseudo-token and save ACH details encrypted
-                        $tokenResult = $this->paymentService->tokenizeCheck([
-                            'routing_number' => $this->routingNumber,
-                            'account_number' => $this->accountNumber,
-                            'account_type' => ucfirst($this->bankAccountType),
-                        ]);
-
-                        if ($tokenResult['token']) {
-                            $this->saveCurrentPaymentMethod($tokenResult['token'], CustomerPaymentMethod::TYPE_ACH);
-                            Log::info('ACH payment method saved with local pseudo-token', [
-                                'last_four' => $tokenResult['last_four'],
-                            ]);
-                        }
-                    }
-                } catch (\Exception $e) {
-                    // Log but don't fail - payment already succeeded
-                    Log::warning('Failed to save payment method after payment', [
-                        'error' => $e->getMessage(),
-                    ]);
-                }
-            }
-
-            // Write payment to PracticeCS if enabled
-            if (config('practicecs.payment_integration.enabled')) {
-                try {
-                    if ($this->isPaymentPlan) {
-                        // Payment plan PracticeCS writes are handled inside
-                        // PaymentService::createPaymentPlan() for down payments
-                        // and ProcessScheduledPayment for installments.
-                        Log::info('Payment plan: PracticeCS write handled by plan service', [
-                            'transaction_id' => $this->transactionId,
-                        ]);
-                    } elseif ($this->paymentMethod === 'ach' && isset($payment)) {
-                        // ACH: Defer PracticeCS write until settlement is confirmed.
-                        // Store the full payload so CheckAchPaymentStatus can write it later.
-                        $practiceCsPayload = $this->buildPracticeCsPayload($paymentResult);
-                        $metadata = $payment->metadata ?? [];
-                        $metadata['practicecs_data'] = $practiceCsPayload;
-                        $payment->update(['metadata' => $metadata]);
-
-                        Log::info('ACH payment: PracticeCS write deferred until settlement', [
-                            'transaction_id' => $this->transactionId,
-                            'payment_id' => $payment->id,
-                        ]);
-                    } else {
-                        // Card payments: Write to PracticeCS immediately (cards settle instantly)
-                        $this->writeToPracticeCs($paymentResult);
-                    }
-                } catch (\Exception $e) {
-                    // Log but don't fail the payment - it already succeeded with the gateway
-                    Log::error('Failed to handle PracticeCS write/deferral', [
-                        'transaction_id' => $this->transactionId,
-                        'error' => $e->getMessage(),
-                        'trace' => $e->getTraceAsString(),
-                    ]);
-                }
-            }
+            // Payment plan success
+            $this->paymentProcessed = true;
+            $this->currentStep = Steps::CONFIRMATION;
 
         } catch (\Exception $e) {
             $this->addError('payment', 'Payment processing failed: '.$e->getMessage());
@@ -777,259 +627,88 @@ class PaymentFlow extends Component
 
             return;
         }
-
-        // Send payment receipt email
-        try {
-            $clientEmail = $this->clientInfo['email'] ?? null;
-
-            if ($clientEmail) {
-                Mail::to($clientEmail)
-                    ->send(new \App\Mail\PaymentReceipt($paymentData, $this->clientInfo, $this->transactionId));
-
-                // Log successful email send
-                Log::info('Payment receipt email sent', [
-                    'transaction_id' => $this->transactionId,
-                    'client_id' => $this->clientInfo['client_id'],
-                    'amount' => $paymentData['amount'],
-                ]);
-            } else {
-                Log::warning('Payment receipt email not sent - no client email on file', [
-                    'transaction_id' => $this->transactionId,
-                    'client_id' => $this->clientInfo['client_id'],
-                ]);
-            }
-        } catch (\Exception $e) {
-            // Log email failure but don't block payment completion
-            Log::error('Failed to send payment receipt email', [
-                'transaction_id' => $this->transactionId,
-                'error' => $e->getMessage(),
-            ]);
-        }
-
-        // Persist accepted engagements
-        $this->persistAcceptedEngagements();
-
-        // Mark as completed
-        $this->paymentProcessed = true;
-        $this->currentStep = Steps::CONFIRMATION;
     }
 
     /**
-     * Build the PracticeCS payload for this payment without writing it.
-     *
-     * This data structure can be stored in the payment's metadata for deferred
-     * writing (ACH payments that need to wait for settlement confirmation),
-     * or used immediately by writeToPracticeCs() for card payments.
-     *
-     * @param  array  $paymentResult  Gateway payment result with transaction_id
-     * @return array Structured payload containing 'payment' data and optional 'group_distribution'
+     * Build a ProcessPaymentCommand for the orchestrator from current component state.
      */
-    protected function buildPracticeCsPayload(array $paymentResult): array
+    private function buildOrchestratorCommand(\App\Models\Customer $customer): ProcessPaymentCommand
     {
-        // Get payment method type mapping
-        $paymentMethodMap = [
-            'credit_card' => 'credit_card',
-            'ach' => 'ach',
-            'check' => 'check',
-        ];
-
-        $methodType = $paymentMethodMap[$this->paymentMethod] ?? 'cash';
-
-        // CRITICAL: Payment amount should NOT include credit card fee
-        $paymentAmount = $this->paymentAmount;
-
-        // Get primary client KEY (the client who logged in)
-        $primaryClientKey = $this->clientInfo['client_KEY'] ?? $this->clientInfo['clients'][0]['client_KEY'];
-        $primaryClientName = $this->clientInfo['client_name'] ?? 'group member';
-
-        // Step 1: Separate invoices by client
-        $primaryInvoices = [];
-        $otherClientsInvoices = [];  // Grouped by client_KEY
-
-        foreach ($this->selectedInvoices as $invoiceNumber) {
+        $invoiceDetails = collect($this->selectedInvoices)->map(function ($invoiceNumber) {
             $invoice = collect($this->openInvoices)->firstWhere('invoice_number', $invoiceNumber);
 
-            if (! $invoice) {
-                Log::warning('Invoice not found for PracticeCS payload', [
-                    'invoice_number' => $invoiceNumber,
-                    'transaction_id' => $paymentResult['transaction_id'],
-                ]);
+            return $invoice ? [
+                'invoice_number' => $invoice['invoice_number'],
+                'description' => $invoice['description'],
+                'amount' => $invoice['open_amount'],
+                'ledger_entry_KEY' => $invoice['ledger_entry_KEY'] ?? null,
+                'open_amount' => $invoice['open_amount'],
+                'client_KEY' => $invoice['client_KEY'] ?? null,
+                'client_name' => $invoice['client_name'] ?? null,
+                'client_id' => $invoice['client_id'] ?? null,
+            ] : null;
+        })->filter()->values()->toArray();
 
-                continue;
-            }
-
-            // Skip placeholder invoices
-            if (isset($invoice['is_placeholder']) && $invoice['is_placeholder']) {
-                continue;
-            }
-
-            if ($invoice['client_KEY'] == $primaryClientKey) {
-                $primaryInvoices[] = $invoice;
-            } else {
-                $clientKey = $invoice['client_KEY'];
-                if (! isset($otherClientsInvoices[$clientKey])) {
-                    $otherClientsInvoices[$clientKey] = [
-                        'client_KEY' => $clientKey,
-                        'client_name' => $invoice['client_name'],
-                        'client_id' => $invoice['client_id'],
-                        'invoices' => [],
-                    ];
-                }
-                $otherClientsInvoices[$clientKey]['invoices'][] = $invoice;
-            }
+        if ($this->paymentMethod === 'credit_card') {
+            return ProcessPaymentCommand::cardPayment(
+                customer: $customer,
+                amount: $this->paymentAmount,
+                fee: $this->creditCardFee,
+                clientInfo: $this->clientInfo,
+                selectedInvoiceNumbers: $this->selectedInvoices,
+                invoiceDetails: $invoiceDetails,
+                openInvoices: $this->openInvoices,
+                cardDetails: [
+                    'number' => str_replace(' ', '', $this->cardNumber),
+                    'exp_month' => (int) substr($this->cardExpiry, 0, 2),
+                    'exp_year' => (int) ('20'.substr($this->cardExpiry, 3, 2)),
+                    'cvc' => $this->cardCvv,
+                    'name' => $this->clientInfo['client_name'],
+                    'street' => '',
+                    'zip_code' => '',
+                    'email' => $this->clientInfo['email'] ?? '',
+                ],
+                engagements: $this->engagementsToPersist ?? [],
+                sendReceipt: true,
+                savePaymentMethod: $this->savePaymentMethod && ! $this->selectedSavedMethodId,
+                paymentMethodNickname: $this->paymentMethodNickname ?? null,
+            );
         }
 
-        // Step 2: Build primary client invoice applications
-        $primaryInvoicesToApply = [];
-        $remainingAmount = $paymentAmount;
-
-        foreach ($primaryInvoices as $invoice) {
-            if ($remainingAmount <= 0) {
-                break;
-            }
-
-            $applyAmount = min($remainingAmount, (float) $invoice['open_amount']);
-            $primaryInvoicesToApply[] = [
-                'ledger_entry_KEY' => $invoice['ledger_entry_KEY'],
-                'amount' => $applyAmount,
-            ];
-            $remainingAmount -= $applyAmount;
+        if ($this->paymentMethod === 'ach') {
+            return ProcessPaymentCommand::achPayment(
+                customer: $customer,
+                amount: $this->paymentAmount,
+                clientInfo: $this->clientInfo,
+                selectedInvoiceNumbers: $this->selectedInvoices,
+                invoiceDetails: $invoiceDetails,
+                openInvoices: $this->openInvoices,
+                achDetails: [
+                    'routing_number' => $this->routingNumber,
+                    'account_number' => $this->accountNumber,
+                    'account_type' => $this->bankAccountType,
+                    'account_name' => $this->clientInfo['client_name'],
+                    'is_business' => (bool) $this->isBusiness,
+                    'bank_name' => $this->bankName ?? null,
+                ],
+                engagements: $this->engagementsToPersist ?? [],
+                sendReceipt: true,
+                savePaymentMethod: $this->savePaymentMethod && ! $this->selectedSavedMethodId,
+                paymentMethodNickname: $this->paymentMethodNickname ?? null,
+            );
         }
 
-        // Step 3: Build the primary payment data
-        $payload = [
-            'payment' => [
-                'client_KEY' => $primaryClientKey,
-                'amount' => $paymentAmount,
-                'reference' => $paymentResult['transaction_id'],
-                'comments' => "Online payment - {$this->paymentMethod} - ".count($this->selectedInvoices).' invoice(s)',
-                'internal_comments' => json_encode([
-                    'source' => 'tr-pay',
-                    'transaction_id' => $paymentResult['transaction_id'],
-                    'payment_method' => $this->paymentMethod,
-                    'is_payment_plan' => $this->isPaymentPlan,
-                    'fee' => $this->creditCardFee,
-                    'has_group_distribution' => ! empty($otherClientsInvoices),
-                    'processed_at' => now()->toIso8601String(),
-                ]),
-                'staff_KEY' => config('practicecs.payment_integration.staff_key'),
-                'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
-                'ledger_type_KEY' => config("practicecs.payment_integration.ledger_types.{$methodType}"),
-                'subtype_KEY' => config("practicecs.payment_integration.payment_subtypes.{$methodType}"),
-                'invoices' => $primaryInvoicesToApply,
-            ],
-        ];
-
-        // Step 4: Build group distribution data if needed
-        if ($remainingAmount > 0.01 && ! empty($otherClientsInvoices)) {
-            $staffKey = config('practicecs.payment_integration.staff_key');
-            $distributedAmount = 0;
-            $groupDistribution = [];
-
-            foreach ($otherClientsInvoices as $clientData) {
-                $clientKey = $clientData['client_KEY'];
-                $clientInvoices = $clientData['invoices'];
-
-                $clientTotal = array_sum(array_column($clientInvoices, 'open_amount'));
-                $clientAmount = min($remainingAmount - $distributedAmount, $clientTotal);
-
-                if ($clientAmount <= 0.01) {
-                    break;
-                }
-
-                // Build invoice applications for this client
-                $invoicesToApply = [];
-                $applyRemaining = $clientAmount;
-
-                foreach ($clientInvoices as $invoice) {
-                    if ($applyRemaining <= 0.01) {
-                        break;
-                    }
-
-                    $applyAmount = min($applyRemaining, (float) $invoice['open_amount']);
-                    $invoicesToApply[] = [
-                        'ledger_entry_KEY' => $invoice['ledger_entry_KEY'],
-                        'amount' => $applyAmount,
-                    ];
-                    $applyRemaining -= $applyAmount;
-                }
-
-                $groupDistribution[] = [
-                    'client_KEY' => $clientKey,
-                    'client_name' => $clientData['client_name'] ?? 'group member',
-                    'amount' => $clientAmount,
-                    'invoices' => $invoicesToApply,
-                    'credit_memo' => [
-                        'client_KEY' => $clientKey,
-                        'amount' => $clientAmount,
-                        'comments' => 'Credit memo - payment from '.$primaryClientName,
-                        'internal_comments_data' => [
-                            'source' => 'tr-pay',
-                            'transaction_id' => $paymentResult['transaction_id'],
-                            'memo_type' => 'credit',
-                            'from_client_KEY' => $primaryClientKey,
-                            'from_client_name' => $primaryClientName,
-                            'group_distribution' => true,
-                        ],
-                        'staff_KEY' => $staffKey,
-                        'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
-                        'ledger_type_KEY' => config('practicecs.payment_integration.memo_types.credit'),
-                        'subtype_KEY' => config('practicecs.payment_integration.memo_subtypes.credit'),
-                    ],
-                    'debit_memo' => [
-                        'client_KEY' => $primaryClientKey,
-                        'amount' => $clientAmount,
-                        'comments' => 'Debit memo - payment to '.($clientData['client_name'] ?? 'group member'),
-                        'internal_comments_data' => [
-                            'source' => 'tr-pay',
-                            'transaction_id' => $paymentResult['transaction_id'],
-                            'memo_type' => 'debit',
-                            'to_client_KEY' => $clientKey,
-                            'to_client_name' => $clientData['client_name'] ?? '',
-                            'group_distribution' => true,
-                        ],
-                        'staff_KEY' => $staffKey,
-                        'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
-                        'ledger_type_KEY' => config('practicecs.payment_integration.memo_types.debit'),
-                        'subtype_KEY' => config('practicecs.payment_integration.memo_subtypes.debit'),
-                    ],
-                ];
-
-                $distributedAmount += $clientAmount;
-            }
-
-            $payload['group_distribution'] = $groupDistribution;
-        }
-
-        return $payload;
-    }
-
-    /**
-     * Write payment to PracticeCS with client group support.
-     *
-     * Handles payments across client groups by:
-     * 1. Writing payment to primary client
-     * 2. Applying payment to primary client's invoices
-     * 3. Creating debit memo on primary client for overpayment
-     * 4. Creating credit memos on other group clients
-     * 5. Applying credit memos to other clients' invoices
-     */
-    protected function writeToPracticeCs(array $paymentResult): void
-    {
-        $writer = app(\App\Services\PracticeCsPaymentWriter::class);
-        $payload = $this->buildPracticeCsPayload($paymentResult);
-
-        $result = $writer->writeDeferredPayment($payload);
-
-        if (! $result['success']) {
-            throw new \Exception('PracticeCS payment write failed: '.($result['error'] ?? 'Unknown error'));
-        }
-
-        Log::info('Payment written to PracticeCS', [
-            'transaction_id' => $paymentResult['transaction_id'],
-            'ledger_entry_KEY' => $result['ledger_entry_KEY'],
-            'has_group_distribution' => isset($payload['group_distribution']),
-        ]);
+        // Check payment
+        return ProcessPaymentCommand::checkPayment(
+            customer: $customer,
+            amount: $this->paymentAmount,
+            clientInfo: $this->clientInfo,
+            selectedInvoiceNumbers: $this->selectedInvoices,
+            invoiceDetails: $invoiceDetails,
+            openInvoices: $this->openInvoices,
+            engagements: $this->engagementsToPersist ?? [],
+            sendReceipt: true,
+        );
     }
 
     /**

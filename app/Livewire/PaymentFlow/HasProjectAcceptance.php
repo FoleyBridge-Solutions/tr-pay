@@ -4,8 +4,6 @@
 
 namespace App\Livewire\PaymentFlow;
 
-use App\Models\ProjectAcceptance;
-use App\Services\EngagementAcceptanceService;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -162,87 +160,9 @@ trait HasProjectAcceptance
         $this->calculatePaymentAmount();
     }
 
-    /**
-     * Persist queued accepted engagements to the database and update PracticeCS.
-     *
-     * This method:
-     * 1. Saves acceptance records to local SQLite database (audit trail)
-     * 2. Updates PracticeCS to change engagement type from EXPANSION to target type
-     *    (e.g., EXPTAX -> TAXFEEREQ, EXPADVISORY -> 2026ADVISOR) using year-aware
-     *    resolution based on the project description's tax year
-     * 3. Updates local record with payment and sync status
-     */
-    private function persistAcceptedEngagements(): void
-    {
-        $engagementService = app(EngagementAcceptanceService::class);
-        $staffKey = config('practicecs.payment_integration.staff_key', 1552);
-
-        foreach ($this->engagementsToPersist as $engagement) {
-            // Check if already persisted to avoid duplicates
-            $existing = ProjectAcceptance::where('project_engagement_key', $engagement['project_engagement_key'])
-                ->first();
-
-            if (! $existing) {
-                // 1. Save to local SQLite database (audit trail) with payment info
-                $acceptance = ProjectAcceptance::create(array_merge($engagement, [
-                    'paid' => true,
-                    'paid_at' => now(),
-                    'payment_transaction_id' => $this->transactionId ?? null,
-                ]));
-
-                Log::info('Engagement acceptance persisted after payment', [
-                    'engagement_KEY' => $engagement['project_engagement_key'],
-                    'client_key' => $engagement['client_key'],
-                ]);
-
-                // 2. Update PracticeCS: Change engagement type from EXPANSION to target type
-                // This converts the "proposed" engagement into an active engagement
-                // Year-aware: uses project description to determine tax year for type resolution
-                $result = $engagementService->acceptEngagement(
-                    (int) $engagement['project_engagement_key'],
-                    $staffKey,
-                    $engagement['project_description'] ?? null
-                );
-
-                // 3. Update local record with sync status
-                if ($result['success']) {
-                    $acceptance->update([
-                        'practicecs_updated' => true,
-                        'new_engagement_type_key' => $result['new_type_KEY'] ?? null,
-                        'practicecs_updated_at' => now(),
-                    ]);
-
-                    Log::info('PracticeCS engagement type updated', [
-                        'engagement_KEY' => $engagement['project_engagement_key'],
-                        'new_type_KEY' => $result['new_type_KEY'] ?? null,
-                    ]);
-                } else {
-                    // Log error but don't fail the payment - local record is saved
-                    $acceptance->update([
-                        'practicecs_updated' => false,
-                        'practicecs_error' => $result['error'] ?? 'Unknown error',
-                    ]);
-
-                    Log::error('Failed to update PracticeCS engagement type', [
-                        'engagement_KEY' => $engagement['project_engagement_key'],
-                        'error' => $result['error'] ?? 'Unknown error',
-                    ]);
-                }
-            } else {
-                // Already exists - update with payment info if not already paid
-                if (! $existing->paid) {
-                    $existing->update([
-                        'paid' => true,
-                        'paid_at' => now(),
-                        'payment_transaction_id' => $this->transactionId ?? null,
-                    ]);
-                }
-            }
-        }
-
-        // Clear the queue
-        $this->engagementsToPersist = [];
-    }
+    // persistAcceptedEngagements() has been moved to PaymentOrchestrator.
+    // Engagement persistence is now handled by PaymentOrchestrator::persistEngagements()
+    // for one-time payments (both public and admin flows).
 
     /**
      * Get the notes from the first project in an engagement.

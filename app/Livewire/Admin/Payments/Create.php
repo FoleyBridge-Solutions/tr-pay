@@ -10,14 +10,12 @@ use App\Models\AdminActivity;
 use App\Models\Customer;
 use App\Models\CustomerPaymentMethod;
 use App\Models\Payment;
-use App\Models\ProjectAcceptance;
 use App\Repositories\PaymentRepository;
-use App\Services\EngagementAcceptanceService;
+use App\Services\PaymentOrchestrator;
+use App\Services\PaymentOrchestrator\ProcessPaymentCommand;
 use App\Services\PaymentService;
-use App\Services\PracticeCsPaymentWriter;
 use App\Support\Money;
 use Carbon\Carbon;
-use FoleyBridgeSolutions\MiPaymentChoiceCashier\Services\QuickPaymentsService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -557,7 +555,7 @@ class Create extends Component
     /**
      * Process or schedule the payment.
      */
-    public function processPayment(QuickPaymentsService $quickPayments, PracticeCsPaymentWriter $practiceWriter): void
+    public function processPayment(): void
     {
         $this->errorMessage = null;
         $this->processing = true;
@@ -573,7 +571,7 @@ class Create extends Component
             if ($this->scheduleForLater) {
                 $this->schedulePayment();
             } else {
-                $this->processImmediatePayment($quickPayments, $practiceWriter);
+                $this->processImmediatePayment();
             }
         } catch (\Exception $e) {
             Log::error('Failed to process payment', [
@@ -729,84 +727,15 @@ class Create extends Component
     }
 
     /**
-     * Process an immediate payment.
+     * Process an immediate payment via the PaymentOrchestrator.
      */
-    protected function processImmediatePayment(QuickPaymentsService $quickPayments, PracticeCsPaymentWriter $practiceWriter): void
+    protected function processImmediatePayment(): void
     {
         // Generate transaction ID
         $this->transactionId = 'txn_'.bin2hex(random_bytes(16));
 
-        // Determine if using saved method or new details
-        if ($this->paymentMethodType === 'saved') {
-            $this->processWithSavedMethod($quickPayments, $practiceWriter);
-        } else {
-            $this->processWithManualEntry($quickPayments, $practiceWriter);
-        }
-    }
-
-    /**
-     * Process payment with saved payment method.
-     */
-    protected function processWithSavedMethod(QuickPaymentsService $quickPayments, PracticeCsPaymentWriter $practiceWriter): void
-    {
-        $savedMethod = $this->getSelectedSavedMethod();
-        if (! $savedMethod) {
-            throw new \Exception('No saved payment method selected.');
-        }
-
-        $customer = Customer::where('client_id', $this->selectedClient['client_id'])->first();
-        if (! $customer) {
-            throw new \Exception('Customer not found.');
-        }
-
-        $isCard = $savedMethod->type === CustomerPaymentMethod::TYPE_CARD;
-        $chargeAmount = $isCard ? $this->getTotalCharge() : $this->paymentAmount;
-
-        // Charge using the saved token
-        $chargeResponse = $customer->charge(Money::toCents($chargeAmount), [
-            'payment_method' => $savedMethod->mpc_token,
-            'description' => 'Admin payment - '.count($this->selectedInvoices).' invoice(s)',
-        ]);
-
-        if (! $chargeResponse) {
-            throw new \Exception('No response received from payment gateway.');
-        }
-
-        // Gateway returns TransactionId (not TransactionKey)
-        $gatewayTransactionId = $chargeResponse['PnRef'] ?? $chargeResponse['TransactionId'] ?? null;
-
-        if (empty($gatewayTransactionId)) {
-            Log::error('Saved method charge response missing transaction ID', [
-                'client_id' => $this->selectedClient['client_id'] ?? null,
-                'payment_method_id' => $savedMethod->id,
-                'response' => $chargeResponse,
-            ]);
-
-            $errorMessage = $chargeResponse['ResponseMessage']
-                ?? $chargeResponse['ResponseStatus']['Message']
-                ?? $chargeResponse['ResultText']
-                ?? 'Payment failed — no transaction ID returned from gateway';
-
-            throw new \Exception($errorMessage);
-        }
-
-        $this->recordSuccessfulPayment(
-            (string) $gatewayTransactionId,
-            $isCard ? 'credit_card' : 'ach',
-            $savedMethod->last_four,
-            $practiceWriter,
-            $customer
-        );
-    }
-
-    /**
-     * Process payment with manually entered card/ACH details.
-     */
-    protected function processWithManualEntry(QuickPaymentsService $quickPayments, PracticeCsPaymentWriter $practiceWriter): void
-    {
+        // Resolve or create customer
         $paymentService = app(PaymentService::class);
-
-        // Ensure a local customer record exists for this PracticeCS client
         $customer = Customer::where('client_id', $this->selectedClient['client_id'])->first();
         if (! $customer) {
             $customer = $paymentService->getOrCreateCustomer([
@@ -816,16 +745,104 @@ class Create extends Component
             ]);
         }
 
+        $command = $this->buildAdminOrchestratorCommand($customer);
+
+        $orchestrator = app(PaymentOrchestrator::class);
+        $result = $orchestrator->processPayment($command);
+
+        if (! $result->success) {
+            throw new \Exception($result->error ?? 'Payment processing failed');
+        }
+
+        $this->transactionId = $result->transactionId;
+        $isAch = ! $this->isCardPaymentMethod() && $this->paymentMethodType !== 'card';
+        $fee = $this->isCardPaymentMethod() ? $this->getCreditCardFee() : 0;
+        $baseAmount = $this->getBasePaymentAmount();
+
+        $this->successMessage = $isAch
+            ? 'ACH payment submitted successfully! It will be marked as completed once it settles (2-3 business days).'
+            : 'Payment processed successfully!';
+        $this->currentStep = 4; // Success step
+
+        // Log the activity (admin-specific concern, kept in Livewire component)
+        $invoiceCount = $this->leaveUnapplied ? 0 : count($this->selectedInvoices);
+        $engagementCount = count($this->selectedEngagements);
+
+        $activityDescription = $this->leaveUnapplied
+            ? "Processed unapplied payment {$this->transactionId} for {$this->selectedClient['client_name']} - Amount: \$".number_format($baseAmount, 2).' (credit balance)'
+            : "Processed payment {$this->transactionId} for {$this->selectedClient['client_name']} - Amount: \$".number_format($baseAmount, 2);
+
+        AdminActivity::log(
+            AdminActivity::ACTION_CREATED,
+            $result->payment,
+            description: $activityDescription,
+            newValues: [
+                'transaction_id' => $this->transactionId,
+                'gateway_transaction_id' => $result->gatewayTransactionId,
+                'client_id' => $this->selectedClient['client_id'],
+                'client_name' => $this->selectedClient['client_name'],
+                'amount' => $baseAmount,
+                'fee' => $fee,
+                'total_amount' => Money::addDollars($baseAmount, $fee),
+                'payment_method' => $this->paymentMethodType === 'saved'
+                    ? ($this->getSelectedSavedMethod()?->type === CustomerPaymentMethod::TYPE_CARD ? 'credit_card' : 'ach')
+                    : $this->paymentMethodType,
+                'payment_method_last_four' => $result->payment->payment_method_last_four ?? '****',
+                'invoice_count' => $invoiceCount,
+                'invoice_keys' => $this->leaveUnapplied ? [] : $this->selectedInvoices,
+                'engagement_count' => $engagementCount,
+                'engagement_keys' => $this->selectedEngagements,
+                'unapplied' => $this->leaveUnapplied,
+            ]
+        );
+    }
+
+    /**
+     * Build a ProcessPaymentCommand for the orchestrator from current admin state.
+     *
+     * @param  Customer  $customer  The local customer record
+     * @return ProcessPaymentCommand Immutable command for the orchestrator
+     */
+    private function buildAdminOrchestratorCommand(Customer $customer): ProcessPaymentCommand
+    {
+        $fee = $this->getCreditCardFee();
+        $baseAmount = $this->getBasePaymentAmount();
+
+        // Build invoice details from selected invoices
+        $invoiceDetails = array_values(array_filter(
+            $this->availableInvoices,
+            fn ($inv) => in_array((string) $inv['ledger_entry_KEY'], $this->selectedInvoices, true)
+        ));
+
+        if ($this->paymentMethodType === 'saved') {
+            $savedMethod = $this->getSelectedSavedMethod();
+            if (! $savedMethod) {
+                throw new \Exception('No saved payment method selected.');
+            }
+
+            return ProcessPaymentCommand::adminSavedMethodPayment(
+                customer: $customer,
+                amount: $this->feeIncludedInCustomAmount ? $this->paymentAmount : $baseAmount,
+                fee: $fee,
+                feeIncludedInAmount: $this->feeIncludedInCustomAmount,
+                clientInfo: $this->selectedClient,
+                selectedInvoiceNumbers: $this->leaveUnapplied ? [] : $this->selectedInvoices,
+                invoiceDetails: $this->leaveUnapplied ? [] : $invoiceDetails,
+                savedMethod: $savedMethod,
+                leaveUnapplied: $this->leaveUnapplied,
+                selectedEngagementKeys: $this->selectedEngagements,
+                pendingEngagements: $this->pendingEngagements,
+            );
+        }
+
         if ($this->paymentMethodType === 'card') {
             // Parse expiry — supports MM/YY (e.g. "06/28") and M/D/YYYY (e.g. "6/1/2028")
             $expiryParts = explode('/', $this->cardExpiry);
 
             if (count($expiryParts) === 3) {
-                // M/D/YYYY format — month is first part, year is third part
                 $expMonth = (int) $expiryParts[0];
                 $expYear = (int) $expiryParts[2];
             } elseif (count($expiryParts) === 2) {
-                // MM/YY format — month is first part, year is second part
                 $expMonth = (int) $expiryParts[0];
                 $rawYear = $expiryParts[1];
                 $expYear = strlen((string) $rawYear) <= 2 ? (int) ('20'.$rawYear) : (int) $rawYear;
@@ -833,202 +850,44 @@ class Create extends Component
                 throw new \Exception('Invalid card expiry format. Please use MM/YY.');
             }
 
-            $tokenResponse = $quickPayments->createQpToken([
-                'number' => preg_replace('/\D/', '', $this->cardNumber),
-                'exp_month' => $expMonth,
-                'exp_year' => $expYear,
-                'cvc' => $this->cardCvv,
-                'name' => $this->cardName,
-            ]);
-
-            if (empty($tokenResponse['QuickPaymentsToken'])) {
-                throw new \Exception('Failed to create payment token');
-            }
-
-            $qpToken = $tokenResponse['QuickPaymentsToken'];
-            $chargeResponse = $quickPayments->charge($qpToken, $this->getTotalCharge(), [
-                'invoice_number' => $this->transactionId,
-                'force_duplicate' => true,
-            ]);
-
-            $lastFour = substr(preg_replace('/\D/', '', $this->cardNumber), -4);
-            $methodType = 'credit_card';
-
-            // Gateway returns TransactionId (not TransactionKey)
-            $gatewayTransactionId = $chargeResponse['PnRef'] ?? $chargeResponse['TransactionId'] ?? null;
-
-            if (empty($gatewayTransactionId)) {
-                Log::error('Card charge response missing transaction ID', [
-                    'transaction_id' => $this->transactionId,
-                    'client_id' => $this->selectedClient['client_id'] ?? null,
-                    'response' => $chargeResponse,
-                ]);
-
-                $errorMessage = $chargeResponse['ResponseMessage']
-                    ?? $chargeResponse['ResponseStatus']['Message']
-                    ?? $chargeResponse['ResultText']
-                    ?? 'Payment failed — no transaction ID returned from gateway';
-
-                throw new \Exception($errorMessage);
-            }
-
-            $this->recordSuccessfulPayment(
-                (string) $gatewayTransactionId,
-                $methodType,
-                $lastFour,
-                $practiceWriter,
-                $customer
-            );
-        } else {
-            // ACH payment via Kotapay
-            $chargeResponse = $paymentService->chargeAchWithKotapay(
-                $customer,
-                [
-                    'routing_number' => preg_replace('/\D/', '', $this->routingNumber),
-                    'account_number' => preg_replace('/\D/', '', $this->accountNumber),
-                    'account_type' => ucfirst($this->accountType),
-                    'account_name' => $this->accountName,
-                    'is_business' => $this->isBusiness,
+            return ProcessPaymentCommand::adminCardPayment(
+                customer: $customer,
+                amount: $this->feeIncludedInCustomAmount ? $this->paymentAmount : $baseAmount,
+                fee: $fee,
+                feeIncludedInAmount: $this->feeIncludedInCustomAmount,
+                clientInfo: $this->selectedClient,
+                selectedInvoiceNumbers: $this->leaveUnapplied ? [] : $this->selectedInvoices,
+                invoiceDetails: $this->leaveUnapplied ? [] : $invoiceDetails,
+                cardDetails: [
+                    'number' => preg_replace('/\D/', '', $this->cardNumber),
+                    'exp_month' => $expMonth,
+                    'exp_year' => $expYear,
+                    'cvc' => $this->cardCvv,
+                    'name' => $this->cardName,
                 ],
-                $this->paymentAmount,
-                [
-                    'description' => 'Admin payment - '.count($this->selectedInvoices).' invoice(s)',
-                ]
-            );
-
-            if (! $chargeResponse['success']) {
-                throw new \Exception($chargeResponse['error'] ?? 'ACH payment failed');
-            }
-
-            $lastFour = substr($this->accountNumber, -4);
-            $methodType = 'ach';
-
-            $this->recordSuccessfulPayment(
-                $chargeResponse['transaction_id'],
-                $methodType,
-                $lastFour,
-                $practiceWriter,
-                $customer
+                leaveUnapplied: $this->leaveUnapplied,
+                selectedEngagementKeys: $this->selectedEngagements,
+                pendingEngagements: $this->pendingEngagements,
             );
         }
-    }
 
-    /**
-     * Record a successful payment.
-     *
-     * Uses getBasePaymentAmount() to get the amount applied to client account
-     * (which may differ from paymentAmount if fee is included in custom amount).
-     */
-    protected function recordSuccessfulPayment(string $gatewayTransactionId, string $methodType, string $lastFour, PracticeCsPaymentWriter $practiceWriter, Customer $customer): void
-    {
-        $fee = $methodType === 'credit_card' ? $this->getCreditCardFee() : 0;
-        $baseAmount = $this->getBasePaymentAmount();
-
-        Log::info('Payment charged successfully', [
-            'transaction_id' => $this->transactionId,
-            'gateway_transaction_id' => $gatewayTransactionId,
-            'base_amount' => $baseAmount,
-            'fee' => $fee,
-            'total_charged' => $this->getTotalCharge(),
-        ]);
-
-        // Build description including engagements if any
-        $invoiceCount = $this->leaveUnapplied ? 0 : count($this->selectedInvoices);
-        $engagementCount = count($this->selectedEngagements);
-
-        if ($this->leaveUnapplied) {
-            $description = 'Admin payment - Unapplied (credit balance)';
-        } elseif ($engagementCount > 0 && $invoiceCount > 0) {
-            $description = "Admin payment - {$invoiceCount} invoice(s), {$engagementCount} fee request(s)";
-        } elseif ($engagementCount > 0) {
-            $description = "Admin payment - {$engagementCount} fee request(s)";
-        } else {
-            $description = "Admin payment - {$invoiceCount} invoice(s)";
-        }
-
-        $isAch = $methodType === 'ach';
-
-        $payment = Payment::create([
-            'customer_id' => $customer->id,
-            'transaction_id' => $this->transactionId,
-            'client_id' => $this->selectedClient['client_id'],
-            'amount' => $baseAmount,
-            'fee' => $fee,
-            'total_amount' => Money::addDollars($baseAmount, $fee),
-            'payment_method' => $methodType,
-            'payment_method_last_four' => $lastFour,
-            'status' => $isAch ? Payment::STATUS_PROCESSING : Payment::STATUS_COMPLETED,
-            'processed_at' => $isAch ? null : now(),
-            'payment_vendor' => $isAch ? 'kotapay' : null,
-            'vendor_transaction_id' => $isAch ? $gatewayTransactionId : null,
-            'description' => $description,
-            'metadata' => array_filter([
-                'source' => 'admin-immediate',
-                'client_id' => $this->selectedClient['client_id'],
-                'client_name' => $this->selectedClient['client_name'],
-                'gateway_transaction_id' => $gatewayTransactionId,
-                'invoice_keys' => $this->leaveUnapplied ? [] : $this->selectedInvoices,
-                'engagement_keys' => $this->selectedEngagements,
-                'pending_engagements' => $this->getSelectedEngagementsData(),
-                'unapplied' => $this->leaveUnapplied,
-                'fee_included_in_amount' => $this->feeIncludedInCustomAmount,
-                // ACH-specific fields for potential batch reprocessing
-                'is_business' => $methodType === 'ach' ? $this->isBusiness : null,
-            ], fn ($v) => $v !== null),
-        ]);
-
-        // Persist accepted engagements (auto-accept on behalf of client)
-        $this->persistAcceptedEngagements();
-
-        // Write to PracticeCS if enabled
-        if (config('practicecs.payment_integration.enabled')) {
-            if ($isAch) {
-                // ACH: Defer PracticeCS write until settlement is confirmed
-                $practiceCsPayload = $this->buildPracticeCsPayload($practiceWriter, $methodType);
-                $metadata = $payment->metadata ?? [];
-                $metadata['practicecs_data'] = $practiceCsPayload;
-                $payment->update(['metadata' => $metadata]);
-
-                Log::info('ACH payment: PracticeCS write deferred until settlement', [
-                    'transaction_id' => $this->transactionId,
-                    'payment_id' => $payment->id,
-                ]);
-            } else {
-                // Card payments: Write to PracticeCS immediately
-                $this->writeToPracticeCs($practiceWriter, $methodType);
-            }
-        }
-
-        $this->successMessage = $isAch
-            ? 'ACH payment submitted successfully! It will be marked as completed once it settles (2-3 business days).'
-            : 'Payment processed successfully!';
-        $this->currentStep = 4; // Success step
-
-        // Log the activity
-        $activityDescription = $this->leaveUnapplied
-            ? "Processed unapplied payment {$this->transactionId} for {$this->selectedClient['client_name']} - Amount: \$".number_format($baseAmount, 2).' (credit balance)'
-            : "Processed payment {$this->transactionId} for {$this->selectedClient['client_name']} - Amount: \$".number_format($baseAmount, 2);
-
-        AdminActivity::log(
-            AdminActivity::ACTION_CREATED,
-            $payment,
-            description: $activityDescription,
-            newValues: [
-                'transaction_id' => $this->transactionId,
-                'gateway_transaction_id' => $gatewayTransactionId,
-                'client_id' => $this->selectedClient['client_id'],
-                'client_name' => $this->selectedClient['client_name'],
-                'amount' => $baseAmount,
-                'fee' => $fee,
-                'total_amount' => Money::addDollars($baseAmount, $fee),
-                'payment_method' => $methodType,
-                'payment_method_last_four' => $lastFour,
-                'invoice_count' => $invoiceCount,
-                'invoice_keys' => $this->leaveUnapplied ? [] : $this->selectedInvoices,
-                'engagement_count' => $engagementCount,
-                'engagement_keys' => $this->selectedEngagements,
-                'unapplied' => $this->leaveUnapplied,
-            ]
+        // ACH payment
+        return ProcessPaymentCommand::adminAchPayment(
+            customer: $customer,
+            amount: $baseAmount,
+            clientInfo: $this->selectedClient,
+            selectedInvoiceNumbers: $this->leaveUnapplied ? [] : $this->selectedInvoices,
+            invoiceDetails: $this->leaveUnapplied ? [] : $invoiceDetails,
+            achDetails: [
+                'routing_number' => preg_replace('/\D/', '', $this->routingNumber),
+                'account_number' => preg_replace('/\D/', '', $this->accountNumber),
+                'account_type' => ucfirst($this->accountType),
+                'account_name' => $this->accountName,
+                'is_business' => $this->isBusiness,
+            ],
+            leaveUnapplied: $this->leaveUnapplied,
+            selectedEngagementKeys: $this->selectedEngagements,
+            pendingEngagements: $this->pendingEngagements,
         );
     }
 
@@ -1066,178 +925,6 @@ class Create extends Component
         }
 
         return $invoicesToApply;
-    }
-
-    /**
-     * Build the PracticeCS payload without writing it.
-     *
-     * Used for both immediate writes (cards) and deferred writes (ACH).
-     *
-     * @return array Structured payload with 'payment' key for writeDeferredPayment()
-     */
-    protected function buildPracticeCsPayload(PracticeCsPaymentWriter $writer, string $methodType): array
-    {
-        $invoiceCount = $this->leaveUnapplied ? 0 : count($this->selectedInvoices);
-        $engagementCount = count($this->selectedEngagements);
-        $baseAmount = $this->getBasePaymentAmount();
-
-        // Build comments including engagements if any
-        if ($this->leaveUnapplied) {
-            $comments = "Online payment - {$methodType} - Unapplied (credit balance)";
-        } elseif ($engagementCount > 0 && $invoiceCount > 0) {
-            $comments = "Online payment - {$methodType} - {$invoiceCount} invoice(s), {$engagementCount} fee request(s)";
-        } elseif ($engagementCount > 0) {
-            $comments = "Online payment - {$methodType} - {$engagementCount} fee request(s)";
-        } else {
-            $comments = "Online payment - {$methodType} - {$invoiceCount} invoice(s)";
-        }
-
-        return [
-            'payment' => [
-                'client_KEY' => $this->selectedClient['client_KEY'],
-                'amount' => $baseAmount,
-                'reference' => $this->transactionId,
-                'comments' => $comments,
-                'internal_comments' => json_encode([
-                    'source' => 'tr-pay-admin',
-                    'transaction_id' => $this->transactionId,
-                    'payment_method' => $methodType,
-                    'fee' => $this->getCreditCardFee(),
-                    'processed_at' => now()->toIso8601String(),
-                    'unapplied' => $this->leaveUnapplied,
-                    'fee_included_in_amount' => $this->feeIncludedInCustomAmount,
-                    'engagement_keys' => $this->selectedEngagements,
-                ]),
-                'staff_KEY' => config('practicecs.payment_integration.staff_key'),
-                'bank_account_KEY' => config('practicecs.payment_integration.bank_account_key'),
-                'ledger_type_KEY' => config("practicecs.payment_integration.ledger_types.{$methodType}"),
-                'subtype_KEY' => config("practicecs.payment_integration.payment_subtypes.{$methodType}"),
-                'invoices' => $this->leaveUnapplied ? [] : $this->getInvoicesForApplication(),
-            ],
-        ];
-    }
-
-    /**
-     * Write payment to PracticeCS.
-     *
-     * Uses getBasePaymentAmount() to write the amount applied to client account
-     * (which excludes fee when fee is included in custom amount).
-     */
-    protected function writeToPracticeCs(PracticeCsPaymentWriter $writer, string $methodType): void
-    {
-        $payload = $this->buildPracticeCsPayload($writer, $methodType);
-
-        $result = $writer->writeDeferredPayment($payload);
-
-        if (! $result['success']) {
-            Log::error('Failed to write payment to PracticeCS', [
-                'transaction_id' => $this->transactionId,
-                'error' => $result['error'],
-            ]);
-        } else {
-            Log::info('Payment written to PracticeCS', [
-                'transaction_id' => $this->transactionId,
-                'ledger_entry_KEY' => $result['ledger_entry_KEY'],
-            ]);
-        }
-    }
-
-    /**
-     * Persist accepted engagements to the database and update PracticeCS.
-     *
-     * When admin selects fee requests (EXP engagements) and payment succeeds,
-     * this method:
-     * 1. Creates ProjectAcceptance records (admin accepting on behalf of client)
-     * 2. Updates PracticeCS engagement type from EXPANSION to target type
-     */
-    protected function persistAcceptedEngagements(): void
-    {
-        if (empty($this->selectedEngagements)) {
-            return;
-        }
-
-        $engagementService = app(EngagementAcceptanceService::class);
-        $staffKey = config('practicecs.payment_integration.staff_key', 1552);
-
-        foreach ($this->pendingEngagements as $engagement) {
-            $engagementKey = (int) $engagement['engagement_KEY'];
-
-            if (! in_array($engagementKey, $this->selectedEngagements, true)) {
-                continue;
-            }
-
-            // Check if already persisted to avoid duplicates
-            $existing = ProjectAcceptance::where('project_engagement_key', $engagementKey)->first();
-
-            // Get first project notes for year-aware type resolution
-            $firstProjectNotes = ! empty($engagement['projects']) ? ($engagement['projects'][0]['notes'] ?? null) : null;
-
-            if (! $existing) {
-                // Create acceptance record (admin accepting on behalf of client)
-                $acceptance = ProjectAcceptance::create([
-                    'project_engagement_key' => $engagementKey,
-                    'client_key' => $engagement['client_KEY'],
-                    'client_group_name' => $engagement['group_name'] ?? null,
-                    'engagement_id' => $engagement['engagement_type_id'] ?? null,
-                    'project_name' => $engagement['engagement_name'],
-                    'budget_amount' => $engagement['total_budget'],
-                    'accepted' => true,
-                    'accepted_at' => now(),
-                    'accepted_by_ip' => request()->ip(),
-                    'acceptance_signature' => 'Admin Accepted',
-                    'paid' => true,
-                    'paid_at' => now(),
-                    'payment_transaction_id' => $this->transactionId,
-                ]);
-
-                Log::info('Admin accepted engagement on behalf of client', [
-                    'engagement_KEY' => $engagementKey,
-                    'engagement_name' => $engagement['engagement_name'],
-                    'client_key' => $engagement['client_KEY'],
-                    'transaction_id' => $this->transactionId,
-                    'project_count' => count($engagement['projects']),
-                ]);
-
-                // Update PracticeCS engagement type (year-aware)
-                $result = $engagementService->acceptEngagement(
-                    $engagementKey,
-                    $staffKey,
-                    $firstProjectNotes
-                );
-
-                if ($result['success']) {
-                    $acceptance->update([
-                        'practicecs_updated' => true,
-                        'new_engagement_type_key' => $result['new_type_KEY'] ?? null,
-                        'practicecs_updated_at' => now(),
-                    ]);
-
-                    Log::info('PracticeCS engagement type updated', [
-                        'engagement_KEY' => $engagementKey,
-                        'new_type_KEY' => $result['new_type_KEY'] ?? null,
-                    ]);
-                } else {
-                    $acceptance->update([
-                        'practicecs_updated' => false,
-                        'practicecs_error' => $result['error'] ?? 'Unknown error',
-                    ]);
-
-                    Log::error('Failed to update PracticeCS engagement type', [
-                        'engagement_KEY' => $engagementKey,
-                        'error' => $result['error'] ?? 'Unknown error',
-                    ]);
-                }
-            } else {
-                // Already exists - update with payment info if not already paid
-                if (! $existing->paid) {
-                    $existing->update([
-                        'paid' => true,
-                        'paid_at' => now(),
-                        'payment_transaction_id' => $this->transactionId,
-                    ]);
-                }
-            }
-        }
     }
 
     /**

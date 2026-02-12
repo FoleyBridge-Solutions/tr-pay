@@ -248,86 +248,44 @@ trait HasSavedPaymentMethods
         try {
             $customer = $this->paymentService->getOrCreateCustomer($this->clientInfo);
 
-            // Calculate total amount
-            $totalAmount = $this->paymentAmount;
-            if ($this->paymentMethod === 'credit_card') {
-                $totalAmount += $this->creditCardFee;
-            }
+            $invoiceDetails = collect($this->selectedInvoices)->map(function ($invoiceNumber) {
+                $invoice = collect($this->openInvoices)->firstWhere('invoice_number', $invoiceNumber);
 
-            $description = "Payment for {$this->clientInfo['client_name']} - ".count($this->selectedInvoices).' invoice(s)';
+                return $invoice ? [
+                    'invoice_number' => $invoice['invoice_number'],
+                    'description' => $invoice['description'],
+                    'amount' => $invoice['open_amount'],
+                    'ledger_entry_KEY' => $invoice['ledger_entry_KEY'] ?? null,
+                    'open_amount' => $invoice['open_amount'],
+                    'client_KEY' => $invoice['client_KEY'] ?? null,
+                    'client_name' => $invoice['client_name'] ?? null,
+                    'client_id' => $invoice['client_id'] ?? null,
+                ] : null;
+            })->filter()->values()->toArray();
 
-            // Charge using saved method
-            $paymentResult = $this->paymentService->chargeWithSavedMethod(
-                $customer,
-                $method,
-                $totalAmount,
-                [
-                    'description' => $description,
-                ]
+            $command = \App\Services\PaymentOrchestrator\ProcessPaymentCommand::savedMethodPayment(
+                customer: $customer,
+                amount: $this->paymentAmount,
+                fee: $this->creditCardFee,
+                clientInfo: $this->clientInfo,
+                selectedInvoiceNumbers: $this->selectedInvoices,
+                invoiceDetails: $invoiceDetails,
+                openInvoices: $this->openInvoices,
+                savedMethod: $method,
+                engagements: $this->engagementsToPersist ?? [],
+                sendReceipt: true,
             );
 
-            if (! $paymentResult['success']) {
-                $this->addError('payment', $paymentResult['error'] ?? 'Payment failed.');
+            $orchestrator = app(\App\Services\PaymentOrchestrator::class);
+            $result = $orchestrator->processPayment($command);
+
+            if (! $result->success) {
+                $this->addError('payment', $result->error ?? 'Payment failed.');
 
                 return;
             }
 
-            $this->transactionId = $paymentResult['transaction_id'];
-
-            // Log successful payment
-            Log::info('Payment processed successfully', [
-                'transaction_id' => $this->transactionId,
-                'client_id' => $this->clientInfo['client_id'],
-                'amount' => $this->paymentAmount,
-                'payment_method' => $this->paymentMethod,
-                'saved_method_id' => $this->selectedSavedMethodId,
-            ]);
-
-            // Record the payment with description and vendor metadata
-            $payment = $this->paymentService->recordPayment([
-                'amount' => $this->paymentAmount,
-                'fee' => $this->creditCardFee,
-                'paymentMethod' => $this->paymentMethod,
-                'lastFour' => $method->last_four,
-                'invoices' => $this->selectedInvoices,
-                'description' => $description,
-            ], $this->clientInfo, $this->transactionId, [
-                'payment_vendor' => $paymentResult['payment_vendor'] ?? null,
-                'vendor_transaction_id' => $paymentResult['transaction_id'] ?? null,
-            ]);
-
-            // Write to PracticeCS if enabled
-            if (config('practicecs.payment_integration.enabled')) {
-                try {
-                    $isAchPayment = $this->paymentMethod === 'ach';
-
-                    if ($isAchPayment) {
-                        // ACH: Defer PracticeCS write until settlement is confirmed
-                        $practiceCsPayload = $this->buildPracticeCsPayload($paymentResult);
-                        $metadata = $payment->metadata ?? [];
-                        $metadata['practicecs_data'] = $practiceCsPayload;
-                        $payment->update(['metadata' => $metadata]);
-
-                        Log::info('ACH payment: PracticeCS write deferred until settlement', [
-                            'transaction_id' => $this->transactionId,
-                            'payment_id' => $payment->id,
-                        ]);
-                    } else {
-                        // Card payments: Write to PracticeCS immediately
-                        $this->writeToPracticeCs($paymentResult);
-                    }
-                } catch (\Exception $e) {
-                    Log::error('Failed to handle PracticeCS write/deferral', [
-                        'transaction_id' => $this->transactionId,
-                        'error' => $e->getMessage(),
-                    ]);
-                }
-            }
-
-            // Persist accepted engagements
-            $this->persistAcceptedEngagements();
-
-            // Mark as completed
+            $this->transactionId = $result->transactionId;
             $this->paymentProcessed = true;
             $this->goToStep(Steps::CONFIRMATION);
 
@@ -337,99 +295,10 @@ trait HasSavedPaymentMethods
                 'method_id' => $this->selectedSavedMethodId,
                 'error' => $e->getMessage(),
             ]);
-
-            return;
-        }
-
-        // Send payment receipt email
-        try {
-            $clientEmail = $this->clientInfo['email'] ?? null;
-
-            if ($clientEmail) {
-                $paymentData = [
-                    'amount' => $this->paymentAmount,
-                    'paymentMethod' => $this->paymentMethod,
-                    'fee' => $this->creditCardFee,
-                    'invoices' => collect($this->selectedInvoices)->map(function ($invoiceNumber) {
-                        $invoice = collect($this->openInvoices)->firstWhere('invoice_number', $invoiceNumber);
-
-                        return $invoice ? [
-                            'invoice_number' => $invoice['invoice_number'],
-                            'description' => $invoice['description'],
-                            'amount' => $invoice['open_amount'],
-                        ] : null;
-                    })->filter()->values()->toArray(),
-                ];
-
-                \Illuminate\Support\Facades\Mail::to($clientEmail)
-                    ->send(new \App\Mail\PaymentReceipt($paymentData, $this->clientInfo, $this->transactionId));
-
-                Log::info('Payment receipt email sent', [
-                    'transaction_id' => $this->transactionId,
-                    'client_id' => $this->clientInfo['client_id'],
-                    'amount' => $this->paymentAmount,
-                ]);
-            } else {
-                Log::warning('Payment receipt email not sent - no client email on file', [
-                    'transaction_id' => $this->transactionId,
-                    'client_id' => $this->clientInfo['client_id'],
-                ]);
-            }
-        } catch (\Exception $e) {
-            // Log email failure but don't block payment completion
-            Log::error('Failed to send payment receipt email', [
-                'transaction_id' => $this->transactionId,
-                'error' => $e->getMessage(),
-            ]);
         }
     }
 
-    /**
-     * Save the current payment method after successful payment.
-     */
-    protected function saveCurrentPaymentMethod(string $token, string $type): void
-    {
-        if (! $this->savePaymentMethod) {
-            return;
-        }
-
-        try {
-            $customer = $this->paymentService->getOrCreateCustomer($this->clientInfo);
-
-            $data = [
-                'mpc_token' => $token,
-                'type' => $type,
-                'nickname' => $this->paymentMethodNickname,
-            ];
-
-            if ($type === CustomerPaymentMethod::TYPE_CARD) {
-                $data['last_four'] = substr(str_replace(' ', '', $this->cardNumber), -4);
-                $data['brand'] = CustomerPaymentMethod::detectCardBrand($this->cardNumber);
-                $data['exp_month'] = (int) substr($this->cardExpiry, 0, 2);
-                $data['exp_year'] = (int) ('20'.substr($this->cardExpiry, 3, 2));
-            } else {
-                $data['last_four'] = substr($this->accountNumber, -4);
-                $data['bank_name'] = $this->bankName;
-                $data['account_type'] = $this->bankAccountType;
-                $data['is_business'] = (bool) $this->isBusiness;
-            }
-
-            $savedMethod = $this->paymentMethodService->create($customer, $data, false);
-
-            // Store encrypted bank details for ACH methods (enables scheduled payments)
-            if ($type === CustomerPaymentMethod::TYPE_ACH) {
-                $savedMethod->setBankDetails($this->routingNumber, $this->accountNumber);
-            }
-
-            Log::info('Payment method saved after successful payment', [
-                'customer_id' => $customer->id,
-                'type' => $type,
-            ]);
-        } catch (\Exception $e) {
-            // Log but don't fail - payment already succeeded
-            Log::error('Failed to save payment method after payment', [
-                'error' => $e->getMessage(),
-            ]);
-        }
-    }
+    // saveCurrentPaymentMethod() has been moved to PaymentOrchestrator.
+    // Payment method saving is now handled by PaymentOrchestrator::trySavePaymentMethod()
+    // for one-time payments (both public card and ACH flows).
 }
