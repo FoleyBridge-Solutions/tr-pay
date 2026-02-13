@@ -32,12 +32,147 @@ class PaymentRepository
      */
     public function resolveClientKey(string $clientId): ?int
     {
+        $client = $this->findClientByClientId($clientId);
+
+        return $client ? (int) $client['client_KEY'] : null;
+    }
+
+    /**
+     * Standard columns selected for client lookups.
+     *
+     * All methods that return "a client record" should select these same columns
+     * to ensure a consistent shape across the codebase.
+     */
+    private const CLIENT_SELECT_COLUMNS = '
+        client_KEY,
+        client_id,
+        description AS client_name,
+        individual_first_name,
+        individual_last_name,
+        federal_tin
+    ';
+
+    /**
+     * Find a single PracticeCS client by their human-readable client_id.
+     *
+     * Returns the standard 6-column client record as an associative array,
+     * or null if the client does not exist.
+     *
+     * @param  string  $clientId  The human-readable client identifier (e.g. "SMITH001")
+     * @return array{client_KEY: int, client_id: string, client_name: string, individual_first_name: ?string, individual_last_name: ?string, federal_tin: ?string}|null
+     */
+    public function findClientByClientId(string $clientId): ?array
+    {
         $result = DB::connection('sqlsrv')->selectOne(
-            'SELECT client_KEY FROM Client WHERE client_id = ?',
+            'SELECT '.self::CLIENT_SELECT_COLUMNS.' FROM Client WHERE client_id = ?',
             [$clientId]
         );
 
-        return $result ? (int) $result->client_KEY : null;
+        return $result ? (array) $result : null;
+    }
+
+    /**
+     * Search for clients in PracticeCS.
+     *
+     * Supports three search modes:
+     *  - 'name'      — matches description, individual_last_name, or individual_first_name
+     *  - 'client_id' — matches client_id with LIKE
+     *  - 'tax_id'    — matches last 4 digits of federal_tin (optionally sanitized)
+     *
+     * @param  string  $query  The search term
+     * @param  string  $searchType  One of 'name', 'client_id', 'tax_id'
+     * @param  int  $limit  Maximum results to return
+     * @param  bool  $sanitizeTaxId  Whether to strip non-digits and validate length for tax_id searches
+     * @return array{results: array[], error: string|null}
+     */
+    public function searchClients(string $query, string $searchType = 'name', int $limit = 20, bool $sanitizeTaxId = true): array
+    {
+        $columns = self::CLIENT_SELECT_COLUMNS;
+
+        if ($searchType === 'client_id') {
+            $results = DB::connection('sqlsrv')->select(
+                "SELECT TOP {$limit} {$columns} FROM Client WHERE client_id LIKE ? ORDER BY description",
+                ["%{$query}%"]
+            );
+        } elseif ($searchType === 'tax_id') {
+            if ($sanitizeTaxId) {
+                $last4 = preg_replace('/\D/', '', $query);
+                if (strlen($last4) !== 4) {
+                    return ['results' => [], 'error' => 'Please enter exactly 4 digits for Tax ID search.'];
+                }
+
+                $results = DB::connection('sqlsrv')->select(
+                    "SELECT TOP {$limit} {$columns} FROM Client WHERE RIGHT(REPLACE(REPLACE(federal_tin, '-', ''), ' ', ''), 4) = ? ORDER BY description",
+                    [$last4]
+                );
+            } else {
+                $results = DB::connection('sqlsrv')->select(
+                    "SELECT TOP {$limit} {$columns} FROM Client WHERE RIGHT(federal_tin, 4) = ? ORDER BY description",
+                    [$query]
+                );
+            }
+        } else {
+            // Default: name search
+            $results = DB::connection('sqlsrv')->select(
+                "SELECT TOP {$limit} {$columns} FROM Client WHERE description LIKE ? OR individual_last_name LIKE ? OR individual_first_name LIKE ? ORDER BY description",
+                ["%{$query}%", "%{$query}%", "%{$query}%"]
+            );
+        }
+
+        return [
+            'results' => array_map(fn ($r) => (array) $r, $results),
+            'error' => null,
+        ];
+    }
+
+    /**
+     * Fetch client names from PracticeCS for a batch of client IDs.
+     *
+     * Used by index/listing pages that need to display the live PracticeCS
+     * name alongside locally-stored records.
+     *
+     * @param  array<string>  $clientIds  Array of human-readable client_id values
+     * @return array<string, string> Map of client_id => client_name
+     */
+    public function getClientNames(array $clientIds): array
+    {
+        $clientIds = array_values(array_unique(array_filter($clientIds)));
+
+        if (empty($clientIds)) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($clientIds), '?'));
+
+        $results = DB::connection('sqlsrv')->select(
+            "SELECT client_id, description AS client_name FROM Client WHERE client_id IN ({$placeholders})",
+            $clientIds
+        );
+
+        $names = [];
+        foreach ($results as $row) {
+            $names[$row->client_id] = $row->client_name;
+        }
+
+        return $names;
+    }
+
+    /**
+     * Look up a single client name from PracticeCS by client_id.
+     *
+     * Convenience wrapper around getClientNames() for single lookups.
+     *
+     * @param  string  $clientId  The human-readable client identifier
+     * @return string|null The client name, or null if not found
+     */
+    public function getClientName(string $clientId): ?string
+    {
+        $result = DB::connection('sqlsrv')->selectOne(
+            'SELECT description AS client_name FROM Client WHERE client_id = ?',
+            [$clientId]
+        );
+
+        return $result?->client_name;
     }
 
     /**

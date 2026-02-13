@@ -97,17 +97,7 @@ class Show extends Component
 
         try {
             // Get client details from PracticeCS
-            $client = DB::connection('sqlsrv')->selectOne('
-                SELECT
-                    client_KEY,
-                    client_id,
-                    description AS client_name,
-                    individual_first_name,
-                    individual_last_name,
-                    federal_tin
-                FROM Client
-                WHERE client_id = ?
-            ', [$this->clientId]);
+            $client = $this->paymentRepo->findClientByClientId($this->clientId);
 
             if (! $client) {
                 $this->notFound = true;
@@ -119,14 +109,14 @@ class Show extends Component
                 return;
             }
 
-            $this->client = (array) $client;
+            $this->client = $client;
 
             // Get balance from PracticeCS
-            $balanceData = $this->paymentRepo->getClientBalance($client->client_KEY);
+            $balanceData = $this->paymentRepo->getClientBalance($client['client_KEY']);
             $this->balance = $balanceData['balance'] ?? 0;
 
             // Get open invoices from PracticeCS
-            $this->openInvoices = $this->paymentRepo->getClientOpenInvoices($client->client_KEY);
+            $this->openInvoices = $this->paymentRepo->getClientOpenInvoices($client['client_KEY']);
 
             // Load saved payment methods
             $this->loadPaymentMethods();

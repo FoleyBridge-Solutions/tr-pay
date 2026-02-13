@@ -17,7 +17,6 @@ use App\Services\PaymentService;
 use App\Support\Money;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
@@ -239,17 +238,7 @@ class Create extends Component
         $this->errorMessage = null;
 
         try {
-            $client = DB::connection('sqlsrv')->selectOne('
-                SELECT
-                    client_KEY,
-                    client_id,
-                    description AS client_name,
-                    individual_first_name,
-                    individual_last_name,
-                    federal_tin
-                FROM Client
-                WHERE client_id = ?
-            ', [$clientId]);
+            $client = $this->paymentRepo->findClientByClientId($clientId);
 
             if (! $client) {
                 $this->errorMessage = 'Client not found.';
@@ -257,7 +246,7 @@ class Create extends Component
                 return;
             }
 
-            $this->selectedClient = (array) $client;
+            $this->selectedClient = $client;
 
             // Get client balance
             $balance = $this->paymentRepo->getClientBalance(null, $this->selectedClient['client_id']);

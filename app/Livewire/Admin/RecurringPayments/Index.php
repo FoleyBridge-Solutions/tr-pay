@@ -4,8 +4,8 @@ namespace App\Livewire\Admin\RecurringPayments;
 
 use App\Models\AdminActivity;
 use App\Models\RecurringPayment;
+use App\Repositories\PaymentRepository;
 use Flux\Flux;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
@@ -52,6 +52,13 @@ class Index extends Component
     public array $recurringHistory = [];
 
     public bool $showCancelModal = false;
+
+    protected PaymentRepository $paymentRepo;
+
+    public function boot(PaymentRepository $paymentRepo): void
+    {
+        $this->paymentRepo = $paymentRepo;
+    }
 
     /**
      * Reset pagination when filters change.
@@ -185,12 +192,9 @@ class Index extends Component
         $clientName = $payment->client_name;
         if ($payment->client_id) {
             try {
-                $result = DB::connection('sqlsrv')->selectOne(
-                    'SELECT description AS client_name FROM Client WHERE client_id = ?',
-                    [$payment->client_id]
-                );
-                if ($result) {
-                    $clientName = $result->client_name;
+                $liveName = $this->paymentRepo->getClientName($payment->client_id);
+                if ($liveName) {
+                    $clientName = $liveName;
                 }
             } catch (\Exception $e) {
                 // Fall back to stored client_name on the model
@@ -313,7 +317,6 @@ class Index extends Component
      */
     protected function getClientNames($payments): array
     {
-        // Get unique client IDs from the current page of payments
         $clientIds = $payments->pluck('client_id')->unique()->filter()->values()->toArray();
 
         if (empty($clientIds)) {
@@ -321,22 +324,7 @@ class Index extends Component
         }
 
         try {
-            // Build placeholders for IN clause
-            $placeholders = implode(',', array_fill(0, count($clientIds), '?'));
-
-            $results = DB::connection('sqlsrv')->select("
-                SELECT client_id, description AS client_name
-                FROM Client
-                WHERE client_id IN ({$placeholders})
-            ", $clientIds);
-
-            // Convert to associative array: client_id => client_name
-            $clientNames = [];
-            foreach ($results as $row) {
-                $clientNames[$row->client_id] = $row->client_name;
-            }
-
-            return $clientNames;
+            return $this->paymentRepo->getClientNames($clientIds);
         } catch (\Exception $e) {
             Log::warning('Failed to fetch live client names from PracticeCS', [
                 'error' => $e->getMessage(),

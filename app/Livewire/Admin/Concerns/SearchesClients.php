@@ -4,16 +4,14 @@
 
 namespace App\Livewire\Admin\Concerns;
 
-use Illuminate\Support\Facades\DB;
+use App\Repositories\PaymentRepository;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Trait for searching clients in PracticeCS (SQL Server).
  *
- * Provides a configurable client search with support for:
- * - Name search (description, first/last name)
- * - Client ID search
- * - Tax ID search (last 4 digits of SSN/EIN)
+ * Delegates all queries to PaymentRepository::searchClients() so that
+ * the column list and connection are defined in a single place.
  *
  * Components using this trait must declare these properties:
  * - string $searchType = 'name'
@@ -89,80 +87,25 @@ trait SearchesClients
         }
 
         try {
-            if ($this->searchType === 'client_id') {
-                $result = DB::connection('sqlsrv')->select("
-                    SELECT TOP {$limit}
-                        client_KEY,
-                        client_id,
-                        description AS client_name,
-                        individual_first_name,
-                        individual_last_name,
-                        federal_tin
-                    FROM Client
-                    WHERE client_id LIKE ?
-                    ORDER BY description
-                ", ["%{$query}%"]);
-            } elseif ($this->searchType === 'tax_id') {
-                if ($this->sanitizeTaxIdSearch()) {
-                    // Strip non-digits and validate
-                    $last4 = preg_replace('/\D/', '', $query);
-                    if (strlen($last4) !== 4) {
-                        if (property_exists($this, 'errorMessage')) {
-                            $this->errorMessage = 'Please enter exactly 4 digits for Tax ID search.';
-                        }
+            /** @var PaymentRepository $repo */
+            $repo = app(PaymentRepository::class);
 
-                        if (property_exists($this, 'loading')) {
-                            $this->loading = false;
-                        }
+            $result = $repo->searchClients(
+                $query,
+                $this->searchType,
+                $limit,
+                $this->sanitizeTaxIdSearch()
+            );
 
-                        return;
-                    }
-
-                    $result = DB::connection('sqlsrv')->select("
-                        SELECT TOP {$limit}
-                            client_KEY,
-                            client_id,
-                            description AS client_name,
-                            individual_first_name,
-                            individual_last_name,
-                            federal_tin
-                        FROM Client
-                        WHERE RIGHT(REPLACE(REPLACE(federal_tin, '-', ''), ' ', ''), 4) = ?
-                        ORDER BY description
-                    ", [$last4]);
-                } else {
-                    // Simple tax ID search (no sanitization)
-                    $result = DB::connection('sqlsrv')->select("
-                        SELECT TOP {$limit}
-                            client_KEY,
-                            client_id,
-                            description AS client_name,
-                            individual_first_name,
-                            individual_last_name,
-                            federal_tin
-                        FROM Client
-                        WHERE RIGHT(federal_tin, 4) = ?
-                        ORDER BY description
-                    ", [$query]);
+            if ($result['error'] !== null) {
+                if (property_exists($this, 'errorMessage')) {
+                    $this->errorMessage = $result['error'];
                 }
-            } else {
-                $result = DB::connection('sqlsrv')->select("
-                    SELECT TOP {$limit}
-                        client_KEY,
-                        client_id,
-                        description AS client_name,
-                        individual_first_name,
-                        individual_last_name,
-                        federal_tin
-                    FROM Client
-                    WHERE description LIKE ?
-                       OR individual_last_name LIKE ?
-                       OR individual_first_name LIKE ?
-                    ORDER BY description
-                ", ["%{$query}%", "%{$query}%", "%{$query}%"]);
+
+                return;
             }
 
-            $this->searchResults = array_map(fn ($r) => (array) $r, $result);
+            $this->searchResults = $result['results'];
         } catch (\Exception $e) {
             Log::error('Client search failed', ['error' => $e->getMessage()]);
 

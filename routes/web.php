@@ -93,18 +93,18 @@ Route::prefix('admin')->middleware(['admin'])->group(function () {
 
         $clientKey = isset($client['clients']) ? $client['clients'][0]['client_KEY'] : $client['client_KEY'];
 
-        // Get principal
-        $principal = \Illuminate\Support\Facades\DB::selectOne('
+        // Get principal (PracticeCS SQL Server)
+        $principal = \Illuminate\Support\Facades\DB::connection('sqlsrv')->selectOne('
             SELECT principal__client_KEY FROM Client WHERE client_KEY = ?
         ', [$clientKey]);
 
-        // Get full EIN for the authenticated client
-        $fullEin = \Illuminate\Support\Facades\DB::selectOne('
+        // Get full EIN for the authenticated client (PracticeCS SQL Server)
+        $fullEin = \Illuminate\Support\Facades\DB::connection('sqlsrv')->selectOne('
             SELECT federal_tin FROM Client WHERE client_KEY = ?
         ', [$clientKey])->federal_tin;
 
-        // Get all clients with same full EIN
-        $einClients = \Illuminate\Support\Facades\DB::select('
+        // Get all clients with same full EIN (PracticeCS SQL Server)
+        $einClients = \Illuminate\Support\Facades\DB::connection('sqlsrv')->select('
             SELECT c.client_KEY, c.client_id, c.description as client_name, c.federal_tin
             FROM Client c
             WHERE c.federal_tin = ?

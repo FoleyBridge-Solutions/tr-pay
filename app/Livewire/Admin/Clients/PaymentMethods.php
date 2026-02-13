@@ -6,9 +6,9 @@ use App\Livewire\Admin\Concerns\ValidatesPaymentMethod;
 use App\Models\AdminActivity;
 use App\Models\Customer;
 use App\Models\CustomerPaymentMethod;
+use App\Repositories\PaymentRepository;
 use App\Services\CustomerPaymentMethodService;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
@@ -85,9 +85,12 @@ class PaymentMethods extends Component
 
     protected CustomerPaymentMethodService $paymentMethodService;
 
-    public function boot(CustomerPaymentMethodService $paymentMethodService): void
+    protected PaymentRepository $paymentRepo;
+
+    public function boot(CustomerPaymentMethodService $paymentMethodService, PaymentRepository $paymentRepo): void
     {
         $this->paymentMethodService = $paymentMethodService;
+        $this->paymentRepo = $paymentRepo;
         $this->paymentMethods = collect();
     }
 
@@ -109,17 +112,7 @@ class PaymentMethods extends Component
 
         try {
             // Get client info from PracticeCS
-            $client = DB::connection('sqlsrv')->selectOne('
-                SELECT
-                    client_KEY,
-                    client_id,
-                    description AS client_name,
-                    individual_first_name,
-                    individual_last_name,
-                    federal_tin
-                FROM Client
-                WHERE client_id = ?
-            ', [$this->clientId]);
+            $client = $this->paymentRepo->findClientByClientId($this->clientId);
 
             if (! $client) {
                 $this->errorMessage = 'Client not found.';
@@ -127,13 +120,13 @@ class PaymentMethods extends Component
                 return;
             }
 
-            $this->clientInfo = (array) $client;
+            $this->clientInfo = $client;
 
             // Find or create local Customer record
             $this->customer = Customer::firstOrCreate(
                 ['client_id' => $this->clientId],
                 [
-                    'name' => $client->client_name,
+                    'name' => $client['client_name'],
                 ]
             );
 
