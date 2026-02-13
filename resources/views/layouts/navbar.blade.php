@@ -10,9 +10,6 @@
                     <li class="nav-item">
                         <a class="nav-link" href="{{ route('home') }}">Dashboard</a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ route('employees.index') }}">Employees</a>
-                    </li>
                     @if(Auth::user()->user_role === 'admin')
                         <li class="nav-item">
                             <a class="nav-link" href="{{ route('admin.users') }}">Users</a>
