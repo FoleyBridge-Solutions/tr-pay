@@ -4,7 +4,9 @@
 
 namespace App\Models;
 
+use App\Models\Ach\AchReturn;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -63,6 +65,30 @@ class User extends Authenticatable
             'last_login_at' => 'datetime',
         ];
     }
+
+    // ==================== Relationships ====================
+
+    /**
+     * Get the admin activities performed by this user.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\AdminActivity, self>
+     */
+    public function adminActivities(): HasMany
+    {
+        return $this->hasMany(AdminActivity::class);
+    }
+
+    /**
+     * Get the ACH returns reviewed by this user.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\Ach\AchReturn, self>
+     */
+    public function reviewedAchReturns(): HasMany
+    {
+        return $this->hasMany(AchReturn::class, 'reviewed_by');
+    }
+
+    // ==================== Helper Methods ====================
 
     /**
      * Check if the user is active.

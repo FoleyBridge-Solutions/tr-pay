@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -115,6 +116,26 @@ class CustomerPaymentMethod extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * Get payment plans that use this payment method.
+     *
+     * @return HasMany<PaymentPlan>
+     */
+    public function paymentPlans(): HasMany
+    {
+        return $this->hasMany(PaymentPlan::class);
+    }
+
+    /**
+     * Get recurring payments that use this payment method.
+     *
+     * @return HasMany<RecurringPayment>
+     */
+    public function recurringPayments(): HasMany
+    {
+        return $this->hasMany(RecurringPayment::class);
     }
 
     // ==================== Accessors ====================
@@ -357,14 +378,19 @@ class CustomerPaymentMethod extends Model
     }
 
     /**
-     * Get active payment plans that use this payment method's token.
+     * Get active payment plans that use this payment method.
+     *
+     * Matches by FK (customer_payment_method_id) or legacy token string.
      *
      * @return Collection<PaymentPlan>
      */
     public function getLinkedPaymentPlans(): Collection
     {
         return PaymentPlan::where('customer_id', $this->customer_id)
-            ->where('payment_method_token', $this->mpc_token)
+            ->where(function ($query) {
+                $query->where('customer_payment_method_id', $this->id)
+                    ->orWhere('payment_method_token', $this->mpc_token);
+            })
             ->whereIn('status', [
                 PaymentPlan::STATUS_ACTIVE,
                 PaymentPlan::STATUS_PAST_DUE,
@@ -373,14 +399,19 @@ class CustomerPaymentMethod extends Model
     }
 
     /**
-     * Get active recurring payments that use this payment method's token.
+     * Get active recurring payments that use this payment method.
+     *
+     * Matches by FK (customer_payment_method_id) or legacy token string.
      *
      * @return Collection<RecurringPayment>
      */
     public function getLinkedRecurringPayments(): Collection
     {
         return RecurringPayment::where('customer_id', $this->customer_id)
-            ->where('payment_method_token', $this->mpc_token)
+            ->where(function ($query) {
+                $query->where('customer_payment_method_id', $this->id)
+                    ->orWhere('payment_method_token', $this->mpc_token);
+            })
             ->whereIn('status', [
                 RecurringPayment::STATUS_ACTIVE,
                 RecurringPayment::STATUS_PAUSED,

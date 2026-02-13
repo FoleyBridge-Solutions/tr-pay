@@ -19,10 +19,9 @@ use Illuminate\Support\Facades\Log;
  * This command should be run daily via the scheduler.
  * It finds all active recurring payments with due dates and processes them.
  *
- * Supports three payment_method_token formats:
- * 1. MPC gateway token (cards with a CustomerPaymentMethod record)
- * 2. ACH pseudo-token ("ach_local_..." with encrypted bank details on CustomerPaymentMethod)
- * 3. Legacy encrypted JSON (raw card/ACH data from old imports, pre-saved-method era)
+ * Payment method resolution:
+ * 1. FK lookup via customer_payment_method_id (preferred)
+ * 2. Fallback to mpc_token string match on CustomerPaymentMethod (legacy rows)
  */
 class ProcessRecurringPayments extends Command
 {
@@ -176,9 +175,8 @@ class ProcessRecurringPayments extends Command
     /**
      * Determine the token format and route to the appropriate processing method.
      *
-     * Supports three formats:
-     * 1. Saved method token — references a CustomerPaymentMethod record
-     * 2. Legacy encrypted JSON — raw card/ACH data from old imports
+     * Resolves the CustomerPaymentMethod via FK (customer_payment_method_id)
+     * or falls back to mpc_token string match for legacy rows.
      *
      * @return array Result with 'success', 'transaction_id', etc.
      */
@@ -186,25 +184,37 @@ class ProcessRecurringPayments extends Command
         PaymentService $paymentService,
         RecurringPayment $recurringPayment
     ): array {
-        $token = $recurringPayment->payment_method_token;
-
-        // First, check if this token matches a saved CustomerPaymentMethod
+        // Find the saved payment method via FK or token match
         $savedMethod = $this->findSavedMethod($recurringPayment);
 
         if ($savedMethod) {
             return $this->processWithSavedMethod($paymentService, $recurringPayment, $savedMethod);
         }
 
-        // Fall back to legacy encrypted data format
-        return $this->processWithEncryptedData($paymentService, $recurringPayment);
+        // No saved method found — cannot process
+        throw new \RuntimeException(
+            "No CustomerPaymentMethod found for recurring payment #{$recurringPayment->id} "
+            ."(customer_payment_method_id={$recurringPayment->customer_payment_method_id}, "
+            ."token={$recurringPayment->payment_method_token}). "
+            .'Run the backfill migration or manually assign a payment method.'
+        );
     }
 
     /**
-     * Find the CustomerPaymentMethod record that matches this recurring payment's token.
+     * Find the CustomerPaymentMethod for this recurring payment.
+     *
+     * Prefers the FK relationship (customer_payment_method_id), then falls
+     * back to matching by mpc_token for legacy rows not yet backfilled.
      */
     protected function findSavedMethod(RecurringPayment $recurringPayment): ?CustomerPaymentMethod
     {
-        if (! $recurringPayment->customer_id) {
+        // Prefer FK relationship
+        if ($recurringPayment->customer_payment_method_id) {
+            return $recurringPayment->paymentMethod;
+        }
+
+        // Fallback: match by token string for legacy rows
+        if (! $recurringPayment->customer_id || empty($recurringPayment->payment_method_token)) {
             return null;
         }
 
@@ -254,47 +264,6 @@ class ProcessRecurringPayments extends Command
             'name' => $customer->name,
             'is_business' => $savedMethod->is_business ?? false,
         ];
-
-        return $paymentService->processRecurringCharge(
-            $paymentData,
-            (float) $recurringPayment->amount,
-            $description,
-            $customer
-        );
-    }
-
-    /**
-     * Process payment using legacy encrypted payment data.
-     *
-     * This handles the old format where raw card/ACH data was encrypted
-     * and stored directly in payment_method_token.
-     *
-     * @return array Result with 'success', 'transaction_id', etc.
-     */
-    protected function processWithEncryptedData(
-        PaymentService $paymentService,
-        RecurringPayment $recurringPayment
-    ): array {
-        // Decrypt the payment method token
-        $paymentData = json_decode(decrypt($recurringPayment->payment_method_token), true);
-
-        if (! $paymentData) {
-            throw new \Exception('Invalid payment method token - could not decrypt');
-        }
-
-        // Get or create customer if not exists
-        $customer = $recurringPayment->customer;
-        if (! $customer) {
-            $customer = $paymentService->getOrCreateCustomer([
-                'client_id' => $recurringPayment->client_id,
-                'client_name' => $recurringPayment->client_name,
-            ]);
-
-            $recurringPayment->customer_id = $customer->id;
-            $recurringPayment->save();
-        }
-
-        $description = $recurringPayment->description ?? "Recurring payment - {$recurringPayment->client_name}";
 
         return $paymentService->processRecurringCharge(
             $paymentData,

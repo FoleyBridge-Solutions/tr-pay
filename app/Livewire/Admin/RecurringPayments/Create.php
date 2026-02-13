@@ -9,6 +9,7 @@ use App\Models\AdminActivity;
 use App\Models\Customer;
 use App\Models\CustomerPaymentMethod;
 use App\Models\RecurringPayment;
+use App\Services\CustomerPaymentMethodService;
 use Carbon\Carbon;
 use Flux\Flux;
 use Illuminate\Support\Collection;
@@ -210,10 +211,6 @@ class Create extends Component
         $this->processing = true;
 
         try {
-            // Tokenize payment method (encrypt for storage)
-            $token = $this->tokenizePaymentMethod();
-            $lastFour = $this->getLastFour();
-
             // Parse dates
             $startDate = Carbon::parse($this->startDate);
             $endDate = $this->endDate ? Carbon::parse($this->endDate) : null;
@@ -233,6 +230,11 @@ class Create extends Component
                 ]);
             }
 
+            // Create or resolve the saved payment method (proper tokenization, no raw encryption)
+            $savedMethod = $this->resolvePaymentMethod($customer);
+            $token = $savedMethod?->mpc_token;
+            $lastFour = $savedMethod?->last_four ?? $this->getLastFour();
+
             // Get the actual payment method type (resolve 'saved' to underlying type)
             $actualPaymentMethodType = $this->getActualPaymentMethodType();
 
@@ -250,6 +252,7 @@ class Create extends Component
                 'description' => $this->description ?: null,
                 'payment_method_type' => $actualPaymentMethodType,
                 'payment_method_token' => $token,
+                'customer_payment_method_id' => $savedMethod?->id,
                 'payment_method_last_four' => $lastFour,
                 'status' => $status,
                 'start_date' => $startDate,
@@ -260,7 +263,7 @@ class Create extends Component
                     'created_manually' => true,
                     'created_at' => now()->toIso8601String(),
                     'used_saved_method' => $this->paymentMethodType === 'saved',
-                    'saved_method_id' => $this->paymentMethodType === 'saved' ? $this->savedPaymentMethodId : null,
+                    'saved_method_id' => $savedMethod?->id,
                     'awaiting_payment_method' => ! $hasPaymentMethod,
                 ],
             ]);
@@ -313,9 +316,19 @@ class Create extends Component
     }
 
     /**
-     * Tokenize (encrypt) the payment method.
+     * Resolve the payment method to a CustomerPaymentMethod record.
+     *
+     * For 'saved': returns the existing saved method.
+     * For 'card': tokenizes via MiPaymentChoice gateway and creates a CustomerPaymentMethod.
+     * For 'ach': creates a local pseudo-token CustomerPaymentMethod with encrypted bank details.
+     * For 'none': returns null (pending payment method).
+     *
+     * @param  \App\Models\Customer  $customer  The customer to associate the method with
+     * @return \App\Models\CustomerPaymentMethod|null The saved method, or null for 'none'
+     *
+     * @throws \Exception If saved method not found or gateway tokenization fails
      */
-    protected function tokenizePaymentMethod(): ?string
+    protected function resolvePaymentMethod(Customer $customer): ?CustomerPaymentMethod
     {
         if ($this->paymentMethodType === 'none') {
             return null;
@@ -324,31 +337,43 @@ class Create extends Component
         if ($this->paymentMethodType === 'saved') {
             $method = $this->getSelectedSavedMethod();
             if ($method) {
-                // Return the MPC token directly for saved methods
-                return $method->mpc_token;
+                return $method;
             }
             throw new \Exception('Saved payment method not found.');
         }
 
+        /** @var CustomerPaymentMethodService $service */
+        $service = app(CustomerPaymentMethodService::class);
+
         if ($this->paymentMethodType === CustomerPaymentMethod::TYPE_CARD) {
-            $data = [
-                'type' => CustomerPaymentMethod::TYPE_CARD,
+            $expiry = trim($this->cardExpiry);
+            $expMonth = null;
+            $expYear = null;
+
+            if (preg_match('/^(\d{1,2})\/?(\d{2,4})$/', $expiry, $matches)) {
+                $expMonth = (int) $matches[1];
+                $expYear = (int) $matches[2];
+                if ($expYear < 100) {
+                    $expYear += 2000;
+                }
+            }
+
+            return $service->createFromCardDetails($customer, [
                 'number' => preg_replace('/\D/', '', $this->cardNumber),
-                'expiry' => $this->cardExpiry,
-                'cvv' => $this->cardCvv,
+                'exp_month' => $expMonth ?? 12,
+                'exp_year' => $expYear ?? (int) date('Y'),
+                'cvc' => $this->cardCvv,
                 'name' => $this->cardName,
-            ];
-        } else {
-            $data = [
-                'type' => CustomerPaymentMethod::TYPE_ACH,
-                'routing' => preg_replace('/\D/', '', $this->routingNumber),
-                'account' => preg_replace('/\D/', '', $this->accountNumber),
-                'account_type' => $this->accountType,
-                'name' => $this->accountName,
-            ];
+            ]);
         }
 
-        return encrypt(json_encode($data));
+        // ACH
+        return $service->createFromCheckDetails($customer, [
+            'routing_number' => preg_replace('/\D/', '', $this->routingNumber),
+            'account_number' => preg_replace('/\D/', '', $this->accountNumber),
+            'account_type' => $this->accountType,
+            'name' => $this->accountName,
+        ]);
     }
 
     /**

@@ -443,11 +443,15 @@ class CustomerPaymentMethodService
         $stats = ['payment_plans' => 0, 'recurring_payments' => 0];
 
         DB::transaction(function () use ($oldMethod, $newMethod, &$stats) {
-            // Reassign payment plans
+            // Reassign payment plans — match by FK or legacy token
             $paymentPlansUpdated = PaymentPlan::where('customer_id', $oldMethod->customer_id)
-                ->where('payment_method_token', $oldMethod->mpc_token)
+                ->where(function ($query) use ($oldMethod) {
+                    $query->where('customer_payment_method_id', $oldMethod->id)
+                        ->orWhere('payment_method_token', $oldMethod->mpc_token);
+                })
                 ->whereIn('status', [PaymentPlan::STATUS_ACTIVE, PaymentPlan::STATUS_PAST_DUE])
                 ->update([
+                    'customer_payment_method_id' => $newMethod->id,
                     'payment_method_token' => $newMethod->mpc_token,
                     'payment_method_type' => $newMethod->type === CustomerPaymentMethod::TYPE_CARD ? 'card' : 'ach',
                     'payment_method_last_four' => $newMethod->last_four,
@@ -455,11 +459,15 @@ class CustomerPaymentMethodService
 
             $stats['payment_plans'] = $paymentPlansUpdated;
 
-            // Reassign recurring payments
+            // Reassign recurring payments — match by FK or legacy token
             $recurringUpdated = RecurringPayment::where('customer_id', $oldMethod->customer_id)
-                ->where('payment_method_token', $oldMethod->mpc_token)
+                ->where(function ($query) use ($oldMethod) {
+                    $query->where('customer_payment_method_id', $oldMethod->id)
+                        ->orWhere('payment_method_token', $oldMethod->mpc_token);
+                })
                 ->whereIn('status', [RecurringPayment::STATUS_ACTIVE, RecurringPayment::STATUS_PAUSED])
                 ->update([
+                    'customer_payment_method_id' => $newMethod->id,
                     'payment_method_token' => $newMethod->mpc_token,
                     'payment_method_type' => $newMethod->type === CustomerPaymentMethod::TYPE_CARD ? 'card' : 'ach',
                     'payment_method_last_four' => $newMethod->last_four,

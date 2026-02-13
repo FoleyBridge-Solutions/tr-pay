@@ -4,8 +4,10 @@
 
 namespace App\Models;
 
+use App\Models\Ach\AchEntry;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * Payment Model
@@ -125,6 +127,16 @@ class Payment extends Model
     public function recurringPayment(): BelongsTo
     {
         return $this->belongsTo(RecurringPayment::class);
+    }
+
+    /**
+     * Get the ACH entry for this payment (if processed via Kotapay).
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasOne<\App\Models\Ach\AchEntry, self>
+     */
+    public function achEntry(): HasOne
+    {
+        return $this->hasOne(AchEntry::class);
     }
 
     /**

@@ -4,6 +4,7 @@
 
 namespace App\Models;
 
+use App\Models\Ach\AchEntry;
 use FoleyBridgeSolutions\KotapayCashier\Traits\AchBillable;
 use FoleyBridgeSolutions\MiPaymentChoiceCashier\Traits\CardBillable;
 use Illuminate\Database\Eloquent\Collection;
@@ -102,6 +103,16 @@ class Customer extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
+    }
+
+    /**
+     * Get the ACH entries for this customer.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\Ach\AchEntry, self>
+     */
+    public function achEntries(): HasMany
+    {
+        return $this->hasMany(AchEntry::class);
     }
 
     // ==================== Customer Payment Method Helpers ====================

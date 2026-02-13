@@ -2,8 +2,10 @@
 
 namespace App\Models\Ach;
 
+use App\Models\Payment;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 /**
  * AchBatch Model
@@ -90,6 +92,23 @@ class AchBatch extends Model
     public function entries(): HasMany
     {
         return $this->hasMany(AchEntry::class, 'ach_batch_id');
+    }
+
+    /**
+     * Get the payments linked to this batch through ACH entries.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasManyThrough<\App\Models\Payment, \App\Models\Ach\AchEntry, self>
+     */
+    public function payments(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            Payment::class,
+            AchEntry::class,
+            'ach_batch_id',   // FK on ach_entries
+            'id',             // FK on payments
+            'id',             // Local key on ach_batches
+            'payment_id'      // Local key on ach_entries
+        );
     }
 
     // ==================== Accessors ====================
@@ -196,5 +215,4 @@ class AchBatch extends Model
     {
         return $query->whereDate('effective_entry_date', $date);
     }
-
 }

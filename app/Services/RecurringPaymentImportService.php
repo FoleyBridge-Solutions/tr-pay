@@ -437,14 +437,13 @@ class RecurringPaymentImportService
                     $token = $savedMethod->mpc_token;
                     $status = RecurringPayment::STATUS_ACTIVE;
                 } else {
-                    // Tokenization failed — fall back to encrypted raw data
-                    // so the record is still created and can be fixed later
-                    $token = $this->tokenizePaymentMethod($row, $paymentType);
-                    $status = RecurringPayment::STATUS_ACTIVE;
+                    // Tokenization failed — save as pending so it can be fixed later
+                    // (no longer falls back to encrypting raw card/ACH data)
+                    $status = RecurringPayment::STATUS_PENDING;
 
                     $this->warnings[] = [
                         'row' => $rowNum,
-                        'message' => "Could not create saved payment method for '{$parsedName['client_name']}' - payment info stored encrypted (legacy format)",
+                        'message' => "Could not create saved payment method for '{$parsedName['client_name']}' - saved as pending, add payment method manually",
                     ];
                 }
             }
@@ -472,11 +471,6 @@ class RecurringPaymentImportService
                 $metadata['contact_name'] = $parsedName['contact_name'];
             }
 
-            // Track saved method linkage in metadata
-            if (isset($savedMethod) && $savedMethod) {
-                $metadata['saved_method_id'] = $savedMethod->id;
-            }
-
             // Flag if $0 amount needs review
             if ($needsAmountReview) {
                 $metadata['needs_amount_review'] = true;
@@ -498,6 +492,7 @@ class RecurringPaymentImportService
                 'payment_method_type' => $paymentType,
                 'payment_method_token' => $token,
                 'payment_method_last_four' => $lastFour,
+                'customer_payment_method_id' => isset($savedMethod) && $savedMethod ? $savedMethod->id : null,
                 'status' => $status,
                 'start_date' => $startDate,
                 'end_date' => $endDate,
@@ -957,44 +952,6 @@ class RecurringPaymentImportService
         }
 
         return null;
-    }
-
-    /**
-     * Tokenize the payment method (legacy fallback).
-     *
-     * Encrypts raw card/ACH data for storage. This is only used as a fallback
-     * when gateway tokenization fails during import. Prefer creating a
-     * CustomerPaymentMethod via getOrCreateSavedPaymentMethod() instead.
-     */
-    protected function tokenizePaymentMethod(array $row, string $paymentType): string
-    {
-        // For now, we'll encrypt the card/account data
-        // In production, this should call MiPaymentChoice to create a token
-
-        if ($paymentType === 'card') {
-            $data = [
-                'type' => 'card',
-                'number' => preg_replace('/\D/', '', $row['card_number']),
-                'expiry' => $row['card_expiry'],
-                'cvv' => $row['card_cvv'] ?? '',
-                'name' => $row['card_name'] ?? '',
-            ];
-        } else {
-            // Pad routing number to 9 digits with leading zeros if needed
-            $routing = preg_replace('/\D/', '', $row['routing_number']);
-            $routing = str_pad($routing, 9, '0', STR_PAD_LEFT);
-
-            $data = [
-                'type' => 'ach',
-                'routing' => $routing,
-                'account' => preg_replace('/\D/', '', $row['account_number']),
-                'account_type' => strtolower($row['account_type'] ?? 'checking'),
-                'name' => $row['account_name'] ?? '',
-            ];
-        }
-
-        // Encrypt the data (using Laravel's encryption)
-        return encrypt(json_encode($data));
     }
 
     /**

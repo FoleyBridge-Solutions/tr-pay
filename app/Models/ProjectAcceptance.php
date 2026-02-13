@@ -3,12 +3,15 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ProjectAcceptance extends Model
 {
     protected $fillable = [
         'project_engagement_key',
         'client_key',
+        'customer_id',
+        'payment_id',
         'client_group_name',
         'engagement_id',
         'project_name',
@@ -54,5 +57,27 @@ class ProjectAcceptance extends Model
         return $query->where('paid', true)
             ->where('practicecs_updated', false)
             ->whereNotNull('practicecs_error');
+    }
+
+    // ==================== Relationships ====================
+
+    /**
+     * Get the customer who accepted this project.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<\App\Models\Customer, self>
+     */
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * Get the payment that fulfilled this acceptance.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<\App\Models\Payment, self>
+     */
+    public function payment(): BelongsTo
+    {
+        return $this->belongsTo(Payment::class);
     }
 }

@@ -78,6 +78,7 @@ class PaymentPlan extends Model
         'monthly_payment',
         'duration_months',
         'payment_method_token',
+        'customer_payment_method_id',
         'payment_method_type',
         'payment_method_last_four',
         'status',
@@ -135,6 +136,16 @@ class PaymentPlan extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * Get the saved payment method used for this plan.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<\App\Models\CustomerPaymentMethod, self>
+     */
+    public function paymentMethod(): BelongsTo
+    {
+        return $this->belongsTo(CustomerPaymentMethod::class, 'customer_payment_method_id');
     }
 
     /**
