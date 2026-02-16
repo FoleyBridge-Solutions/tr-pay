@@ -20,11 +20,11 @@ class PracticeCsWriteFailed extends Notification implements ShouldQueue
     /**
      * Create a new notification instance.
      *
-     * @param string $transactionId The payment transaction ID
-     * @param string $clientId The client ID
-     * @param float $amount The payment amount
-     * @param string $error The error message
-     * @param string $context Additional context (e.g., 'recurring', 'plan_installment', 'single')
+     * @param  string  $transactionId  The payment transaction ID
+     * @param  string  $clientId  The client ID
+     * @param  float  $amount  The payment amount
+     * @param  string  $error  The error message
+     * @param  string  $context  Additional context (e.g., 'recurring', 'plan_installment', 'single')
      */
     public function __construct(
         public string $transactionId,
@@ -55,11 +55,11 @@ class PracticeCsWriteFailed extends Notification implements ShouldQueue
             ->subject("[{$appName}] PracticeCS Write Failed - Client {$this->clientId}")
             ->error()
             ->greeting('PracticeCS Payment Write Failed')
-            ->line("A payment was charged but **failed to write to PracticeCS**. Manual intervention required.")
+            ->line('A payment was charged but **failed to write to PracticeCS**. Manual intervention required.')
             ->line('**Payment Details:**')
             ->line("- Transaction ID: {$this->transactionId}")
             ->line("- Client ID: {$this->clientId}")
-            ->line("- Amount: \$".number_format($this->amount, 2))
+            ->line('- Amount: $'.number_format($this->amount, 2))
             ->line("- Context: {$this->context}")
             ->line('')
             ->line('**Error:**')

@@ -20,12 +20,12 @@ class PaymentFailed extends Notification implements ShouldQueue
     /**
      * Create a new notification instance.
      *
-     * @param string $clientName The client/customer name
-     * @param string $clientId The client ID
-     * @param float $amount The payment amount
-     * @param string $error The error message
-     * @param string $paymentType Type of payment (recurring, plan_installment, scheduled)
-     * @param int|null $paymentId The payment record ID
+     * @param  string  $clientName  The client/customer name
+     * @param  string  $clientId  The client ID
+     * @param  float  $amount  The payment amount
+     * @param  string  $error  The error message
+     * @param  string  $paymentType  Type of payment (recurring, plan_installment, scheduled)
+     * @param  int|null  $paymentId  The payment record ID
      */
     public function __construct(
         public string $clientName,
@@ -66,7 +66,7 @@ class PaymentFailed extends Notification implements ShouldQueue
             ->line("An automated payment failed to process for **{$this->clientName}**.")
             ->line('**Payment Details:**')
             ->line("- Client: {$this->clientName} ({$this->clientId})")
-            ->line("- Amount: \$".number_format($this->amount, 2))
+            ->line('- Amount: $'.number_format($this->amount, 2))
             ->line("- Type: {$typeLabel}")
             ->line('')
             ->line('**Error:**')

@@ -20,10 +20,10 @@ class EngagementSyncFailed extends Notification implements ShouldQueue
     /**
      * Create a new notification instance.
      *
-     * @param string $clientName The client name
-     * @param string $clientId The client ID
-     * @param string $error The error message
-     * @param string|null $transactionId The related payment transaction ID
+     * @param  string  $clientName  The client name
+     * @param  string  $clientId  The client ID
+     * @param  string  $error  The error message
+     * @param  string|null  $transactionId  The related payment transaction ID
      */
     public function __construct(
         public string $clientName,

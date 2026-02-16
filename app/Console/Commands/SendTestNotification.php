@@ -22,7 +22,7 @@ class SendTestNotification extends Command
         $this->info('Sending test notification to all active admin users...');
 
         AdminAlertService::notifyAll(new PracticeCsWriteFailed(
-            'TEST-' . now()->format('His'),
+            'TEST-'.now()->format('His'),
             'TEST-CLIENT',
             99.99,
             'This is a test notification — the system is working correctly.',

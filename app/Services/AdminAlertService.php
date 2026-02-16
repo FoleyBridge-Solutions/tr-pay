@@ -22,7 +22,7 @@ class AdminAlertService
      * Each user receives their own copy of the notification so they
      * can independently mark it as read or dismiss it.
      *
-     * @param Notification $notification The notification instance to send
+     * @param  Notification  $notification  The notification instance to send
      */
     public static function notifyAll(Notification $notification): void
     {

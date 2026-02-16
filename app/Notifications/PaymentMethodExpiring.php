@@ -18,12 +18,12 @@ class PaymentMethodExpiring extends Notification implements ShouldQueue
     /**
      * Create a new notification instance.
      *
-     * @param string $clientName The client/customer name
-     * @param string $clientId The client ID
-     * @param string $lastFour Last four digits of the card
-     * @param string $brand Card brand (e.g., Visa, Mastercard)
-     * @param string $expirationDate The expiration date (e.g., 03/2026)
-     * @param int $activeLinksCount Number of active plans/recurring payments linked
+     * @param  string  $clientName  The client/customer name
+     * @param  string  $clientId  The client ID
+     * @param  string  $lastFour  Last four digits of the card
+     * @param  string  $brand  Card brand (e.g., Visa, Mastercard)
+     * @param  string  $expirationDate  The expiration date (e.g., 03/2026)
+     * @param  int  $activeLinksCount  Number of active plans/recurring payments linked
      */
     public function __construct(
         public string $clientName,

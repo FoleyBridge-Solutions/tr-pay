@@ -90,7 +90,7 @@ class BackfillPracticeCsMetadata extends Command
         $this->info("=== PracticeCS Metadata Backfill ({$mode}) ===");
         $this->newLine();
 
-        Log::info("PracticeCS metadata backfill started", ['mode' => $mode]);
+        Log::info('PracticeCS metadata backfill started', ['mode' => $mode]);
 
         $updated = 0;
         $skipped = 0;
@@ -101,7 +101,7 @@ class BackfillPracticeCsMetadata extends Command
 
             if (! $payment) {
                 $this->error("Payment #{$paymentId}: NOT FOUND — skipping");
-                Log::error("Backfill: Payment not found", ['payment_id' => $paymentId]);
+                Log::error('Backfill: Payment not found', ['payment_id' => $paymentId]);
                 $errors++;
 
                 continue;
@@ -122,7 +122,7 @@ class BackfillPracticeCsMetadata extends Command
                 'practicecs_ledger_entry_KEY' => $data['ledger_entry_KEY'],
                 'practicecs_type' => 'payment',
                 'practicecs_backfilled' => true,
-                'practicecs_backfill_note' => 'Backfilled from log evidence (line ' . $data['log_line'] . '). PCS write succeeded but metadata was not persisted due to tracking bug.',
+                'practicecs_backfill_note' => 'Backfilled from log evidence (line '.$data['log_line'].'). PCS write succeeded but metadata was not persisted due to tracking bug.',
             ]);
 
             $metaBefore = $payment->metadata ? json_encode($payment->metadata) : 'NULL';
@@ -130,7 +130,7 @@ class BackfillPracticeCsMetadata extends Command
             if ($isDryRun) {
                 $this->info("Payment #{$paymentId} (\${$payment->amount}):");
                 $this->line("  Before: {$metaBefore}");
-                $this->line("  After:  " . json_encode($newMeta));
+                $this->line('  After:  '.json_encode($newMeta));
                 $this->line("  Ledger Entry KEY: {$data['ledger_entry_KEY']}");
                 $this->line("  Written at: {$data['written_at']}");
                 $this->newLine();
@@ -145,15 +145,15 @@ class BackfillPracticeCsMetadata extends Command
 
                     if ($verified) {
                         $this->info("Payment #{$paymentId} (\${$payment->amount}): Updated — ledger_entry_KEY={$data['ledger_entry_KEY']} ✓");
-                        Log::info("Backfill: Payment metadata updated", [
+                        Log::info('Backfill: Payment metadata updated', [
                             'payment_id' => $paymentId,
                             'ledger_entry_KEY' => $data['ledger_entry_KEY'],
                             'written_at' => $data['written_at'],
                             'meta_before' => $metaBefore,
                         ]);
                     } else {
-                        $this->error("Payment #{$paymentId}: Save did NOT persist! Metadata after refresh: " . json_encode($payment->metadata));
-                        Log::error("Backfill: Metadata save failed to persist", [
+                        $this->error("Payment #{$paymentId}: Save did NOT persist! Metadata after refresh: ".json_encode($payment->metadata));
+                        Log::error('Backfill: Metadata save failed to persist', [
                             'payment_id' => $paymentId,
                             'metadata_after' => $payment->metadata,
                         ]);
@@ -163,7 +163,7 @@ class BackfillPracticeCsMetadata extends Command
                     }
                 } catch (\Exception $e) {
                     $this->error("Payment #{$paymentId}: FAILED — {$e->getMessage()}");
-                    Log::error("Backfill: Exception updating payment", [
+                    Log::error('Backfill: Exception updating payment', [
                         'payment_id' => $paymentId,
                         'error' => $e->getMessage(),
                     ]);
@@ -182,7 +182,7 @@ class BackfillPracticeCsMetadata extends Command
         $this->info("Skipped (already tracked): {$skipped}");
         $this->info("Errors: {$errors}");
 
-        Log::info("PracticeCS metadata backfill completed", [
+        Log::info('PracticeCS metadata backfill completed', [
             'mode' => $mode,
             'updated' => $updated,
             'skipped' => $skipped,

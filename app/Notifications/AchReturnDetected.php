@@ -20,13 +20,13 @@ class AchReturnDetected extends Notification implements ShouldQueue
     /**
      * Create a new notification instance.
      *
-     * @param string $transactionId The payment transaction ID
-     * @param string $clientName The client/customer name
-     * @param string $clientId The client ID
-     * @param float $amount The payment amount
-     * @param string $returnCode The ACH return code (e.g., R01, R02)
-     * @param string $returnReason The return reason description
-     * @param bool $isPostSettlement Whether this is a post-settlement return
+     * @param  string  $transactionId  The payment transaction ID
+     * @param  string  $clientName  The client/customer name
+     * @param  string  $clientId  The client ID
+     * @param  float  $amount  The payment amount
+     * @param  string  $returnCode  The ACH return code (e.g., R01, R02)
+     * @param  string  $returnReason  The return reason description
+     * @param  bool  $isPostSettlement  Whether this is a post-settlement return
      */
     public function __construct(
         public string $transactionId,
@@ -65,7 +65,7 @@ class AchReturnDetected extends Notification implements ShouldQueue
             ->line('**Return Details:**')
             ->line("- Transaction ID: {$this->transactionId}")
             ->line("- Client: {$this->clientName} ({$this->clientId})")
-            ->line("- Amount: \$".number_format($this->amount, 2))
+            ->line('- Amount: $'.number_format($this->amount, 2))
             ->line("- Return Code: {$this->returnCode}")
             ->line("- Reason: {$this->returnReason}")
             ->line("- Stage: {$stage}")

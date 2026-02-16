@@ -17,12 +17,12 @@ class PaymentPlanPastDue extends Notification implements ShouldQueue
     /**
      * Create a new notification instance.
      *
-     * @param string $planId The plan identifier (e.g., plan_xxxxxxxxx)
-     * @param string $clientName The client name
-     * @param string $clientId The client ID
-     * @param float $monthlyPayment The monthly payment amount
-     * @param string $status The new status (past_due or failed)
-     * @param int $paymentsFailed Number of consecutive failures
+     * @param  string  $planId  The plan identifier (e.g., plan_xxxxxxxxx)
+     * @param  string  $clientName  The client name
+     * @param  string  $clientId  The client ID
+     * @param  float  $monthlyPayment  The monthly payment amount
+     * @param  string  $status  The new status (past_due or failed)
+     * @param  int  $paymentsFailed  Number of consecutive failures
      */
     public function __construct(
         public string $planId,
@@ -59,7 +59,7 @@ class PaymentPlanPastDue extends Notification implements ShouldQueue
             ->line('**Plan Details:**')
             ->line("- Plan ID: {$this->planId}")
             ->line("- Client: {$this->clientName} ({$this->clientId})")
-            ->line("- Monthly Payment: \$".number_format($this->monthlyPayment, 2))
+            ->line('- Monthly Payment: $'.number_format($this->monthlyPayment, 2))
             ->line("- Consecutive Failures: {$this->paymentsFailed}")
             ->action('View Payment Plans', route('admin.payment-plans'))
             ->line('')
