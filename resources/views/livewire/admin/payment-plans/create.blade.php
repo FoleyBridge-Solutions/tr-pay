@@ -42,60 +42,7 @@
         <flux:card class="max-w-3xl">
             <div class="p-6">
                 <flux:heading size="lg" class="mb-4">Search for Client</flux:heading>
-
-                <div class="flex gap-4 mb-4">
-                    <div class="w-48">
-                        <flux:select wire:model.live="searchType">
-                            <option value="name">By Name</option>
-                            <option value="client_id">By Client ID</option>
-                            <option value="tax_id">By Tax ID (Last 4)</option>
-                        </flux:select>
-                    </div>
-                    <div class="flex-1">
-                        <flux:input
-                            wire:model="searchQuery"
-                            wire:keydown.enter="searchClients"
-                            placeholder="{{ $searchType === 'name' ? 'Enter client name...' : ($searchType === 'client_id' ? 'Enter client ID...' : 'Enter last 4 digits of SSN/EIN...') }}"
-                            icon="magnifying-glass"
-                            maxlength="{{ $searchType === 'tax_id' ? '4' : '' }}"
-                        />
-                    </div>
-                    <flux:button wire:click="searchClients" variant="primary">
-                        Search
-                    </flux:button>
-                </div>
-
-                {{-- Search Results --}}
-                @if(count($searchResults) > 0)
-                    <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
-                        <flux:table>
-                            <flux:table.columns>
-                                <flux:table.column>Client ID</flux:table.column>
-                                <flux:table.column>Name</flux:table.column>
-                                <flux:table.column>Tax ID</flux:table.column>
-                                <flux:table.column></flux:table.column>
-                            </flux:table.columns>
-                            <flux:table.rows>
-                                @foreach($searchResults as $client)
-                                    <flux:table.row wire:key="client-{{ $client['client_id'] }}">
-                                        <flux:table.cell class="font-mono">{{ $client['client_id'] }}</flux:table.cell>
-                                        <flux:table.cell>{{ $client['client_name'] }}</flux:table.cell>
-                                        <flux:table.cell class="text-zinc-500">****{{ substr($client['federal_tin'] ?? '', -4) }}</flux:table.cell>
-                                        <flux:table.cell>
-                                            <flux:button wire:click="selectClient('{{ $client['client_id'] }}')" size="sm" variant="primary">
-                                                Select
-                                            </flux:button>
-                                        </flux:table.cell>
-                                    </flux:table.row>
-                                @endforeach
-                            </flux:table.rows>
-                        </flux:table>
-                    </div>
-                @elseif($searchQuery && count($searchResults) === 0)
-                    <div class="text-center py-8 text-zinc-500">
-                        No clients found matching your search.
-                    </div>
-                @endif
+                <livewire:admin.client-search mode="select" />
             </div>
         </flux:card>
     @endif
@@ -123,10 +70,7 @@
 
                 <div class="flex items-center justify-between mb-4">
                     <flux:heading size="lg">Select Invoices</flux:heading>
-                    <div class="flex gap-2">
-                        <flux:button wire:click="selectAllInvoices" size="sm" variant="ghost">Select All</flux:button>
-                        <flux:button wire:click="clearSelection" size="sm" variant="ghost">Clear</flux:button>
-                    </div>
+                    <flux:button wire:click="clearSelection" size="sm" variant="ghost">Clear</flux:button>
                 </div>
 
                 @if(count($availableInvoices) === 0)
@@ -135,40 +79,41 @@
                     </div>
                 @else
                     <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden mb-4">
-                        <flux:table>
-                            <flux:table.columns>
-                                <flux:table.column class="w-10"></flux:table.column>
-                                <flux:table.column>Invoice #</flux:table.column>
-                                <flux:table.column>Date</flux:table.column>
-                                <flux:table.column>Due Date</flux:table.column>
-                                <flux:table.column>Type</flux:table.column>
-                                <flux:table.column class="text-right">Amount</flux:table.column>
-                            </flux:table.columns>
-                            <flux:table.rows>
-                                @foreach($availableInvoices as $invoice)
-                                    @php $invoiceKey = (string) $invoice['ledger_entry_KEY']; @endphp
-                                    <flux:table.row
-                                        wire:key="invoice-{{ $invoiceKey }}"
-                                        wire:click="toggleInvoice('{{ $invoiceKey }}')"
-                                        class="cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                                    >
-                                        <flux:table.cell wire:click.stop>
-                                            <flux:checkbox
-                                                :data-checked="in_array($invoiceKey, $selectedInvoices, true) ? '' : null"
-                                                wire:click="toggleInvoice('{{ $invoiceKey }}')"
-                                            />
-                                        </flux:table.cell>
-                                        <flux:table.cell class="font-mono">{{ $invoice['invoice_number'] }}</flux:table.cell>
-                                        <flux:table.cell>{{ $invoice['invoice_date'] }}</flux:table.cell>
-                                        <flux:table.cell>{{ $invoice['due_date'] }}</flux:table.cell>
-                                        <flux:table.cell>{{ $invoice['type'] }}</flux:table.cell>
-                                        <flux:table.cell class="text-right font-medium">
-                                            ${{ number_format($invoice['open_amount'], 2) }}
-                                        </flux:table.cell>
-                                    </flux:table.row>
-                                @endforeach
-                            </flux:table.rows>
-                        </flux:table>
+                        <flux:checkbox.group wire:model.live="selectedInvoices">
+                            <flux:table>
+                                <flux:table.columns>
+                                    <flux:table.column class="w-10">
+                                        <flux:checkbox.all />
+                                    </flux:table.column>
+                                    <flux:table.column>Invoice #</flux:table.column>
+                                    <flux:table.column>Date</flux:table.column>
+                                    <flux:table.column>Due Date</flux:table.column>
+                                    <flux:table.column>Type</flux:table.column>
+                                    <flux:table.column class="text-right">Amount</flux:table.column>
+                                </flux:table.columns>
+                                <flux:table.rows>
+                                    @foreach($availableInvoices as $invoice)
+                                        @php $invoiceKey = (string) $invoice['ledger_entry_KEY']; @endphp
+                                        <flux:table.row
+                                            wire:key="invoice-{{ $invoiceKey }}"
+                                            x-on:click="$el.querySelector('input[type=checkbox]')?.click()"
+                                            class="cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                                        >
+                                            <flux:table.cell x-on:click.stop>
+                                                <flux:checkbox value="{{ $invoiceKey }}" />
+                                            </flux:table.cell>
+                                            <flux:table.cell class="font-mono">{{ $invoice['invoice_number'] }}</flux:table.cell>
+                                            <flux:table.cell>{{ $invoice['invoice_date'] }}</flux:table.cell>
+                                            <flux:table.cell>{{ $invoice['due_date'] }}</flux:table.cell>
+                                            <flux:table.cell>{{ $invoice['type'] }}</flux:table.cell>
+                                            <flux:table.cell class="text-right font-medium">
+                                                ${{ number_format($invoice['open_amount'], 2) }}
+                                            </flux:table.cell>
+                                        </flux:table.row>
+                                    @endforeach
+                                </flux:table.rows>
+                            </flux:table>
+                        </flux:checkbox.group>
                     </div>
 
                     {{-- Selected Total --}}
@@ -199,6 +144,14 @@
 
                 {{-- Payment Type Tabs --}}
                 <div class="flex gap-2 mb-6">
+                    @if($savedPaymentMethods->count() > 0)
+                        <flux:button
+                            wire:click="$set('paymentMethodType', 'saved')"
+                            :variant="$paymentMethodType === 'saved' ? 'primary' : 'ghost'"
+                        >
+                            Saved Method ({{ $savedPaymentMethods->count() }})
+                        </flux:button>
+                    @endif
                     <flux:button
                         wire:click="$set('paymentMethodType', 'card')"
                         :variant="$paymentMethodType === 'card' ? 'primary' : 'ghost'"
@@ -214,7 +167,7 @@
                 </div>
 
                 {{-- Credit Card NCA Notice --}}
-                @if($paymentMethodType === 'card')
+                @if($paymentMethodType === 'card' || ($paymentMethodType === 'saved' && $savedPaymentMethodId && $savedPaymentMethods->firstWhere('id', $savedPaymentMethodId)?->type === 'card'))
                     <flux:callout variant="warning" icon="exclamation-triangle" class="mb-6">
                         <flux:callout.heading>Non-Cash Adjustment</flux:callout.heading>
                         <flux:callout.text>
@@ -222,6 +175,91 @@
                             This fee is included in the total amount and spread across all payments.
                         </flux:callout.text>
                     </flux:callout>
+                @endif
+
+                {{-- Saved Payment Methods --}}
+                @if($paymentMethodType === 'saved')
+                    <div wire:key="payment-fields-saved" class="space-y-3">
+                        @foreach($savedPaymentMethods as $method)
+                            <label
+                                wire:key="saved-method-{{ $method->id }}"
+                                class="block p-4 rounded-lg border-2 cursor-pointer transition-all
+                                    {{ $savedPaymentMethodId === $method->id
+                                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400'
+                                        : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500' }}
+                                    {{ $method->isExpired() ? 'opacity-50' : '' }}"
+                            >
+                                <div class="flex items-center gap-4">
+                                    <input
+                                        type="radio"
+                                        wire:model.live="savedPaymentMethodId"
+                                        value="{{ $method->id }}"
+                                        class="text-blue-500"
+                                        @if($method->isExpired()) disabled @endif
+                                    />
+
+                                    {{-- Card/Bank Icon --}}
+                                    <div class="flex-shrink-0">
+                                        @if($method->type === 'card')
+                                            @switch($method->brand)
+                                                @case('Visa')
+                                                    <div class="w-12 h-8 bg-blue-600 rounded flex items-center justify-center text-white font-bold text-xs">VISA</div>
+                                                    @break
+                                                @case('Mastercard')
+                                                    <div class="w-12 h-8 bg-orange-500 rounded flex items-center justify-center text-white font-bold text-xs">MC</div>
+                                                    @break
+                                                @case('American Express')
+                                                    <div class="w-12 h-8 bg-blue-800 rounded flex items-center justify-center text-white font-bold text-xs">AMEX</div>
+                                                    @break
+                                                @case('Discover')
+                                                    <div class="w-12 h-8 bg-orange-600 rounded flex items-center justify-center text-white font-bold text-xs">DISC</div>
+                                                    @break
+                                                @default
+                                                    <div class="w-12 h-8 bg-zinc-500 rounded flex items-center justify-center text-white font-bold text-xs">CARD</div>
+                                            @endswitch
+                                        @else
+                                            <div class="w-12 h-8 bg-green-600 rounded flex items-center justify-center text-white font-bold text-xs">ACH</div>
+                                        @endif
+                                    </div>
+
+                                    {{-- Method Details --}}
+                                    <div class="flex-1 min-w-0">
+                                        <div class="font-medium text-zinc-900 dark:text-zinc-100">
+                                            @if($method->type === 'card')
+                                                {{ $method->brand ?? 'Card' }} ending in {{ $method->last_four }}
+                                            @else
+                                                {{ ucfirst($method->account_type ?? 'Bank') }} account ending in {{ $method->last_four }}
+                                            @endif
+                                        </div>
+                                        <div class="text-sm text-zinc-500 dark:text-zinc-400">
+                                            @if($method->type === 'card' && $method->exp_month && $method->exp_year)
+                                                Expires {{ str_pad($method->exp_month, 2, '0', STR_PAD_LEFT) }}/{{ $method->exp_year }}
+                                            @elseif($method->type === 'ach' && $method->bank_name)
+                                                {{ $method->bank_name }}
+                                            @endif
+                                            @if($method->nickname)
+                                                &middot; {{ $method->nickname }}
+                                            @endif
+                                        </div>
+                                    </div>
+
+                                    {{-- Badges --}}
+                                    <div class="flex items-center gap-2 flex-shrink-0">
+                                        @if($method->is_default)
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                                                Default
+                                            </span>
+                                        @endif
+                                        @if($method->isExpired())
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                                                Expired
+                                            </span>
+                                        @endif
+                                    </div>
+                                </div>
+                            </label>
+                        @endforeach
+                    </div>
                 @endif
 
                 @if($paymentMethodType === 'card')
@@ -247,7 +285,9 @@
                             <flux:input wire:model="cardName" placeholder="John Doe" />
                         </flux:field>
                     </div>
-                @else
+                @endif
+
+                @if($paymentMethodType === 'ach')
                     <div wire:key="payment-fields-ach" class="space-y-4">
                         <flux:field>
                             <flux:label>Account Holder Name</flux:label>
@@ -550,7 +590,19 @@
                     {{-- Payment Method --}}
                     <div>
                         <flux:text class="text-sm text-zinc-500 mb-1">Payment Method</flux:text>
-                        @if($paymentMethodType === 'card')
+                        @if($paymentMethodType === 'saved')
+                            @php $savedMethod = $this->getSelectedSavedMethod(); @endphp
+                            @if($savedMethod)
+                                @if($savedMethod->type === 'card')
+                                    <flux:text class="font-medium">{{ $savedMethod->brand ?? 'Card' }} ending in {{ $savedMethod->last_four }}{{ $savedMethod->nickname ? ' ('.$savedMethod->nickname.')' : '' }}</flux:text>
+                                @else
+                                    <flux:text class="font-medium">{{ $savedMethod->bank_name ?? ucfirst($savedMethod->account_type ?? 'Bank') }} Account ending in {{ $savedMethod->last_four }}{{ $savedMethod->nickname ? ' ('.$savedMethod->nickname.')' : '' }}</flux:text>
+                                @endif
+                                <flux:text class="text-xs text-zinc-400">Saved payment method</flux:text>
+                            @else
+                                <flux:text class="font-medium text-red-500">Saved method not found</flux:text>
+                            @endif
+                        @elseif($paymentMethodType === 'card')
                             <flux:text class="font-medium">Credit Card ending in {{ substr(preg_replace('/\D/', '', $cardNumber), -4) }}</flux:text>
                         @else
                             <flux:text class="font-medium">{{ ucfirst($accountType) }} Account ending in {{ substr($accountNumber, -4) }}</flux:text>
@@ -574,7 +626,7 @@
 
                 {{-- Confirmation --}}
                 <div class="mt-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                    <flux:checkbox wire:model="confirmed" label="I confirm this payment plan has been authorized by the client." />
+                    <flux:checkbox wire:model.live="confirmed" label="I confirm this payment plan has been authorized by the client." />
                 </div>
 
                 <div class="flex justify-between mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-700">

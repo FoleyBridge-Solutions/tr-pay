@@ -3,7 +3,7 @@
 namespace App\Livewire\Admin\PaymentPlans;
 
 use App\Livewire\Admin\Concerns\HasInvoiceManagement;
-use App\Livewire\Admin\Concerns\SearchesClients;
+use App\Livewire\Admin\Concerns\HasSavedPaymentMethodSelection;
 use App\Livewire\Admin\Concerns\ValidatesPaymentMethod;
 use App\Models\AdminActivity;
 use App\Models\CustomerPaymentMethod;
@@ -14,6 +14,7 @@ use App\Support\Money;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
@@ -32,7 +33,7 @@ use Livewire\Component;
 class Create extends Component
 {
     use HasInvoiceManagement;
-    use SearchesClients;
+    use HasSavedPaymentMethodSelection;
     use ValidatesPaymentMethod;
 
     // Wizard state
@@ -41,12 +42,6 @@ class Create extends Component
     public const TOTAL_STEPS = 5;
 
     // Step 1: Client Search
-    public string $searchType = 'name'; // 'name', 'client_id', or 'tax_id'
-
-    public string $searchQuery = '';
-
-    public array $searchResults = [];
-
     public ?array $selectedClient = null;
 
     // Step 2: Invoice Selection
@@ -72,6 +67,11 @@ class Create extends Component
     public string $accountName = '';
 
     public string $accountType = 'checking';
+
+    // Saved payment method selection
+    public ?int $savedPaymentMethodId = null;
+
+    public $savedPaymentMethods;
 
     // Step 4: Plan Configuration
     public int $planDuration = 3; // 3, 6, or 9 months
@@ -119,11 +119,20 @@ class Create extends Component
         $this->paymentRepo = $paymentRepo;
     }
 
-    /**
-     * Select a client and load their invoices.
-     */
-    public function selectClient(string $clientId): void
+    public function mount(): void
     {
+        $this->savedPaymentMethods = collect();
+    }
+
+    /**
+     * Handle client selection from the ClientSearch component.
+     *
+     * @param  array  $client  Client data from PracticeCS
+     */
+    #[On('client-selected')]
+    public function selectClient(array $client): void
+    {
+        $clientId = $client['client_id'];
         $this->errorMessage = null;
 
         try {
@@ -144,6 +153,9 @@ class Create extends Component
 
             // Load invoices
             $this->loadInvoices();
+
+            // Load saved payment methods for this client
+            $this->loadSavedPaymentMethods();
 
             // Move to step 2
             $this->currentStep = 2;
@@ -217,12 +229,21 @@ class Create extends Component
     /**
      * Get the credit card NCA fee rate based on the selected payment method.
      *
+     * For saved methods, the fee applies only if the saved method is a card.
+     *
      * @return float The fee rate (e.g. 0.04 for 4%) or 0 if not applicable
      */
     protected function getCreditCardFeeRate(): float
     {
         if ($this->paymentMethodType === CustomerPaymentMethod::TYPE_CARD) {
             return (float) config('payment-fees.credit_card_rate', 0);
+        }
+
+        if ($this->paymentMethodType === 'saved') {
+            $method = $this->getSelectedSavedMethod();
+            if ($method && $method->type === CustomerPaymentMethod::TYPE_CARD) {
+                return (float) config('payment-fees.credit_card_rate', 0);
+            }
         }
 
         return 0.0;
@@ -290,10 +311,23 @@ class Create extends Component
     }
 
     /**
-     * Recalculate totals when payment method type changes (card vs ACH).
+     * Recalculate totals when payment method type changes (card vs ACH vs saved).
      * NCA fee only applies to credit card payments.
      */
     public function updatedPaymentMethodType(): void
+    {
+        // Reset saved method selection when switching away from saved
+        if ($this->paymentMethodType !== 'saved') {
+            $this->savedPaymentMethodId = null;
+        }
+        $this->calculateTotals();
+    }
+
+    /**
+     * Recalculate totals when saved payment method selection changes.
+     * NCA fee depends on whether the saved method is a card or ACH.
+     */
+    public function updatedSavedPaymentMethodId(): void
     {
         $this->calculateTotals();
     }
@@ -407,11 +441,11 @@ class Create extends Component
     /**
      * Get the supported payment method types.
      *
-     * Payment plans do not support saved payment methods.
+     * Payment plans support saved methods, credit cards, and ACH.
      */
     protected function supportedPaymentTypes(): array
     {
-        return [CustomerPaymentMethod::TYPE_CARD, CustomerPaymentMethod::TYPE_ACH];
+        return ['saved', CustomerPaymentMethod::TYPE_CARD, CustomerPaymentMethod::TYPE_ACH];
     }
 
     /**
@@ -449,37 +483,12 @@ class Create extends Component
                 'client_name' => $this->selectedClient['client_name'],
             ];
 
-            // Generate payment token
-            $paymentMethodToken = $this->generatePaymentToken();
-            $lastFour = $this->getLastFour();
-
-            // Prepare payment method data for down payment processing
-            $paymentMethodData = $this->paymentMethodType === CustomerPaymentMethod::TYPE_CARD
-                ? [
-                    'type' => CustomerPaymentMethod::TYPE_CARD,
-                    'number' => preg_replace('/\D/', '', $this->cardNumber),
-                    'expiry' => $this->cardExpiry,
-                    'cvv' => $this->cardCvv,
-                    'name' => $this->cardName,
-                ]
-                : [
-                    'type' => CustomerPaymentMethod::TYPE_ACH,
-                    'routing' => preg_replace('/\D/', '', $this->routingNumber),
-                    'account' => preg_replace('/\D/', '', $this->accountNumber),
-                    'account_type' => $this->accountType,
-                    'name' => $this->accountName,
-                ];
-
-            // Create the payment plan with down payment
-            $result = $paymentService->createPaymentPlan(
-                $planData,
-                $clientInfo,
-                $paymentMethodToken,
-                $this->paymentMethodType,
-                $lastFour,
-                $paymentMethodData,
-                $this->splitDownPayment
-            );
+            // Route to the appropriate creation method based on payment method type
+            if ($this->paymentMethodType === 'saved') {
+                $result = $this->createPlanWithSavedMethod($paymentService, $planData, $clientInfo);
+            } else {
+                $result = $this->createPlanWithNewMethod($paymentService, $planData, $clientInfo);
+            }
 
             if ($result['success']) {
                 $this->createdPlanId = $result['plan_id'];
@@ -509,7 +518,7 @@ class Create extends Component
                         'monthly_payment' => $this->monthlyPayment,
                         'duration_months' => $this->planDuration,
                         'payment_method' => $this->paymentMethodType,
-                        'payment_method_last_four' => $lastFour,
+                        'payment_method_last_four' => $this->getLastFour(),
                         'split_down_payment' => $this->splitDownPayment,
                         'recurring_day' => $this->recurringDay,
                         'invoice_count' => count($this->selectedInvoices),
@@ -528,6 +537,64 @@ class Create extends Component
         } finally {
             $this->processing = false;
         }
+    }
+
+    /**
+     * Create a payment plan using a saved payment method.
+     *
+     * @return array{success: bool, plan_id?: string, down_payment?: float, payment_plan?: \App\Models\PaymentPlan, error?: string}
+     */
+    protected function createPlanWithSavedMethod(PaymentService $paymentService, array $planData, array $clientInfo): array
+    {
+        $savedMethod = $this->getSelectedSavedMethod();
+
+        if (! $savedMethod) {
+            return ['success' => false, 'error' => 'Selected saved payment method not found.'];
+        }
+
+        return $paymentService->createPaymentPlanWithSavedMethod(
+            $planData,
+            $clientInfo,
+            $savedMethod,
+            $this->splitDownPayment
+        );
+    }
+
+    /**
+     * Create a payment plan using newly entered card or ACH details.
+     *
+     * @return array{success: bool, plan_id?: string, down_payment?: float, payment_plan?: \App\Models\PaymentPlan, error?: string}
+     */
+    protected function createPlanWithNewMethod(PaymentService $paymentService, array $planData, array $clientInfo): array
+    {
+        $paymentMethodToken = $this->generatePaymentToken();
+        $lastFour = $this->getLastFour();
+
+        $paymentMethodData = $this->paymentMethodType === CustomerPaymentMethod::TYPE_CARD
+            ? [
+                'type' => CustomerPaymentMethod::TYPE_CARD,
+                'number' => preg_replace('/\D/', '', $this->cardNumber),
+                'expiry' => $this->cardExpiry,
+                'cvv' => $this->cardCvv,
+                'name' => $this->cardName,
+            ]
+            : [
+                'type' => CustomerPaymentMethod::TYPE_ACH,
+                'routing' => preg_replace('/\D/', '', $this->routingNumber),
+                'account' => preg_replace('/\D/', '', $this->accountNumber),
+                'account_type' => $this->accountType,
+                'name' => $this->accountName,
+            ];
+
+        return $paymentService->createPaymentPlan(
+            $planData,
+            $clientInfo,
+            $paymentMethodToken,
+            $this->paymentMethodType,
+            $lastFour,
+            $paymentMethodData,
+            $this->splitDownPayment
+        );
     }
 
     /**
@@ -565,7 +632,9 @@ class Create extends Component
     }
 
     /**
-     * Generate a payment token (placeholder - real implementation would use payment gateway).
+     * Generate a payment token for new card/ACH entries.
+     *
+     * Not used for saved payment methods (those use the saved method's mpc_token directly).
      */
     protected function generatePaymentToken(): string
     {
@@ -575,26 +644,14 @@ class Create extends Component
     }
 
     /**
-     * Get last 4 digits of payment method.
-     */
-    protected function getLastFour(): string
-    {
-        if ($this->paymentMethodType === CustomerPaymentMethod::TYPE_CARD) {
-            $cleaned = preg_replace('/\D/', '', $this->cardNumber);
-
-            return substr($cleaned, -4);
-        } else {
-            return substr($this->accountNumber, -4);
-        }
-    }
-
-    /**
      * Reset wizard and start over.
      */
     public function startOver(): void
     {
         $this->reset();
+        $this->savedPaymentMethods = collect();
         $this->currentStep = 1;
+        $this->dispatch('reset-client-search');
     }
 
     public function render()
