@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Services\Kotapay\KotapayApiService;
+use FoleyBridgeSolutions\KotapayCashier\Services\ReportService;
 use Illuminate\Console\Command;
 
 class KotapayReportCommand extends Command
@@ -14,7 +14,7 @@ class KotapayReportCommand extends Command
 
     protected $description = 'Get File Acknowledgement Report (FAR) from Kotapay';
 
-    public function handle(KotapayApiService $kotapay): int
+    public function handle(ReportService $reportService): int
     {
         $this->info('Kotapay File Acknowledgement Report');
         $this->line('====================================');
@@ -40,7 +40,7 @@ class KotapayReportCommand extends Command
         $this->line('Fetching report from Kotapay...');
 
         try {
-            $report = $kotapay->getFileAcknowledgementReport($startDate, $endDate);
+            $report = $reportService->getFileAcknowledgementReport($startDate, $endDate);
         } catch (\Exception $e) {
             $this->error('Failed to fetch report: '.$e->getMessage());
 

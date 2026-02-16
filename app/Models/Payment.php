@@ -52,6 +52,8 @@ class Payment extends Model
 
     public const STATUS_REFUNDED = 'refunded';
 
+    public const STATUS_RETURNED = 'returned';
+
     /**
      * The attributes that are mass assignable.
      *
@@ -172,6 +174,26 @@ class Payment extends Model
     }
 
     /**
+     * Scope: Returned payments (post-settlement ACH returns).
+     */
+    public function scopeReturned($query)
+    {
+        return $query->where('status', self::STATUS_RETURNED);
+    }
+
+    /**
+     * Scope: Recently completed Kotapay ACH payments (for post-settlement return monitoring).
+     *
+     * @param  int  $days  Number of days back to include
+     */
+    public function scopeRecentlyCompletedAch($query, int $days = 60)
+    {
+        return $query->where('status', self::STATUS_COMPLETED)
+            ->where('payment_vendor', 'kotapay')
+            ->where('processed_at', '>=', now()->subDays($days));
+    }
+
+    /**
      * Scope: Scheduled payments due on or before a date.
      */
     public function scopeDueOnOrBefore($query, $date)
@@ -230,6 +252,14 @@ class Payment extends Model
     }
 
     /**
+     * Check if this payment was returned after settlement.
+     */
+    public function isReturned(): bool
+    {
+        return $this->status === self::STATUS_RETURNED;
+    }
+
+    /**
      * Mark the payment as processing (ACH submitted, awaiting settlement).
      *
      * @param  string  $transactionId  Internal transaction ID
@@ -266,6 +296,29 @@ class Payment extends Model
         $this->failure_reason = $reason;
         $this->failed_at = now();
         $this->attempt_count++;
+        $this->save();
+    }
+
+    /**
+     * Mark a previously completed payment as returned (post-settlement ACH return).
+     *
+     * @param  string  $returnCode  ACH return code (e.g., R01, R02, R13)
+     * @param  string  $reason  Human-readable return reason
+     */
+    public function markAsReturned(string $returnCode, string $reason): void
+    {
+        $this->status = self::STATUS_RETURNED;
+        $this->failure_reason = "ACH Return {$returnCode}: {$reason}";
+        $this->failed_at = now();
+
+        // Store return details in metadata for audit trail
+        $metadata = $this->metadata ?? [];
+        $metadata['ach_return_code'] = $returnCode;
+        $metadata['ach_return_reason'] = $reason;
+        $metadata['ach_returned_at'] = now()->toIso8601String();
+        $metadata['ach_was_settled'] = true;
+        $this->metadata = $metadata;
+
         $this->save();
     }
 

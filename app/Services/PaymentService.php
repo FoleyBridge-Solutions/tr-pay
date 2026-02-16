@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\PaymentPlan;
+use App\Notifications\PracticeCsWriteFailed;
 use App\Repositories\PaymentRepository;
 use App\Support\Money;
 use FoleyBridgeSolutions\KotapayCashier\Services\PaymentService as KotapayPaymentService;
@@ -267,7 +268,7 @@ class PaymentService
      * @param  Customer  $customer  The customer
      * @param  array  $achDetails  ACH details (routing_number, account_number, account_type, account_name)
      * @param  float  $amount  Amount in dollars
-     * @param  array  $options  Additional options (description, effective_date)
+     * @param  array  $options  Additional options (description, effective_date, account_name_id)
      * @return array Result array with success status and transaction details
      */
     public function chargeAchWithKotapay(Customer $customer, array $achDetails, float $amount, array $options = []): array
@@ -286,6 +287,9 @@ class PaymentService
                 ? config('kotapay.application_id.business')
                 : config('kotapay.application_id.personal');
 
+            $effectiveDate = $options['effective_date'] ?? now()->format('Y-m-d');
+            $accountNameId = $options['account_name_id'] ?? '';
+
             // Use the AchBillable trait method on the customer
             $response = $customer->chargeAch([
                 'routing_number' => $achDetails['routing_number'],
@@ -293,9 +297,10 @@ class PaymentService
                 'account_type' => $achDetails['account_type'] ?? 'Checking',
                 'account_name' => ! empty($achDetails['account_name']) ? $achDetails['account_name'] : $customer->name,
                 'application_id' => $applicationId,
+                'account_name_id' => $accountNameId,
             ], $amountInCents, [
                 'description' => $options['description'] ?? 'ACH Payment',
-                'effective_date' => $options['effective_date'] ?? now()->format('Y-m-d'),
+                'effective_date' => $effectiveDate,
             ]);
 
             // Defense-in-depth: validate Kotapay response status
@@ -333,6 +338,8 @@ class PaymentService
                 'status' => self::STATUS_PENDING, // ACH payments are pending until settled
                 'response' => $response,
                 'payment_vendor' => 'kotapay',
+                'account_name_id' => $accountNameId,
+                'effective_date' => $effectiveDate,
             ];
 
         } catch (\Exception $e) {
@@ -690,6 +697,10 @@ class PaymentService
             ? config('kotapay.application_id.business')
             : config('kotapay.application_id.personal');
 
+        // Generate a unique AccountNameId for Kotapay report matching
+        $accountNameId = 'TP-'.bin2hex(random_bytes(4));
+        $effectiveDate = now()->format('Y-m-d');
+
         // Use the AchBillable trait on the customer to charge via Kotapay
         $response = $customer->chargeAch([
             'routing_number' => $paymentData['routing'],
@@ -697,9 +708,10 @@ class PaymentService
             'account_type' => $accountType,
             'account_name' => ! empty($paymentData['name']) ? $paymentData['name'] : $customer->name,
             'application_id' => $applicationId,
+            'account_name_id' => $accountNameId,
         ], $amountInCents, [
             'description' => $description,
-            'effective_date' => now()->format('Y-m-d'),
+            'effective_date' => $effectiveDate,
         ]);
 
         // Defense-in-depth: validate Kotapay response status
@@ -716,6 +728,7 @@ class PaymentService
 
         Log::info('Recurring ACH charge processed via Kotapay', [
             'transaction_id' => $transactionId,
+            'account_name_id' => $accountNameId,
             'amount' => $amount,
             'customer_id' => $customer->id,
         ]);
@@ -727,6 +740,8 @@ class PaymentService
             'status' => self::STATUS_PENDING, // ACH payments are pending until settled
             'response' => $response,
             'payment_vendor' => 'kotapay',
+            'account_name_id' => $accountNameId,
+            'effective_date' => $effectiveDate,
         ];
     }
 
@@ -1003,6 +1018,18 @@ class PaymentService
                     'client_id' => $paymentPlan->client_id,
                 ]);
 
+                try {
+                    AdminAlertService::notifyAll(new PracticeCsWriteFailed(
+                        $payment->transaction_id ?? 'unknown',
+                        $paymentPlan->client_id,
+                        $amount,
+                        'Cannot resolve client_KEY for plan payment',
+                        'plan_installment'
+                    ));
+                } catch (\Exception $notifyEx) {
+                    Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+                }
+
                 return;
             }
 
@@ -1100,6 +1127,18 @@ class PaymentService
                         'plan_id' => $paymentPlan->plan_id,
                         'error' => $result['error'] ?? 'Unknown error',
                     ]);
+
+                    try {
+                        AdminAlertService::notifyAll(new PracticeCsWriteFailed(
+                            $payment->transaction_id,
+                            $paymentPlan->client_id,
+                            $amount,
+                            $result['error'] ?? 'Unknown error',
+                            'plan_installment'
+                        ));
+                    } catch (\Exception $notifyEx) {
+                        Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+                    }
                 }
             }
         } catch (\Exception $e) {

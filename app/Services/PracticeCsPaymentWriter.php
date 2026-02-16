@@ -4,6 +4,7 @@
 
 namespace App\Services;
 
+use App\Notifications\PracticeCsWriteFailed;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -145,6 +146,18 @@ class PracticeCsPaymentWriter
                 'trace' => $e->getTraceAsString(),
                 'payment_data' => $paymentData,
             ]);
+
+            try {
+                AdminAlertService::notifyAll(new PracticeCsWriteFailed(
+                    $paymentData['reference'] ?? 'unknown',
+                    (string) ($paymentData['client_KEY'] ?? 'unknown'),
+                    (float) ($paymentData['amount'] ?? 0),
+                    $e->getMessage(),
+                    'payment'
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+            }
 
             return [
                 'success' => false,
@@ -345,6 +358,18 @@ class PracticeCsPaymentWriter
                 'trace' => $e->getTraceAsString(),
                 'memo_data' => $memoData,
             ]);
+
+            try {
+                AdminAlertService::notifyAll(new PracticeCsWriteFailed(
+                    $memoData['reference'] ?? 'unknown',
+                    (string) ($memoData['client_KEY'] ?? 'unknown'),
+                    (float) ($memoData['amount'] ?? 0),
+                    $e->getMessage(),
+                    "memo_{$memoType}"
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+            }
 
             return [
                 'success' => false,

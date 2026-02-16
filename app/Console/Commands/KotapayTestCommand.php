@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Services\Kotapay\KotapayApiService;
+use FoleyBridgeSolutions\KotapayCashier\Services\ApiClient;
 use Illuminate\Console\Command;
 
 class KotapayTestCommand extends Command
@@ -11,7 +11,7 @@ class KotapayTestCommand extends Command
 
     protected $description = 'Test connection to Kotapay API';
 
-    public function handle(KotapayApiService $kotapay): int
+    public function handle(ApiClient $apiClient): int
     {
         $this->info('Kotapay API Connection Test');
         $this->line('============================');
@@ -32,7 +32,7 @@ class KotapayTestCommand extends Command
         $this->info('Testing authentication...');
 
         try {
-            $token = $kotapay->getAccessToken();
+            $token = $apiClient->getAccessToken();
             $this->info('✓ Authentication successful!');
             $this->line('  Token: '.substr($token, 0, 30).'...');
         } catch (\Exception $e) {

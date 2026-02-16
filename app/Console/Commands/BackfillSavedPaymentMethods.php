@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\CustomerPaymentMethod;
 use App\Models\RecurringPayment;
 use App\Services\CustomerPaymentMethodService;
+use FoleyBridgeSolutions\MiPaymentChoiceCashier\Services\QuickPaymentsService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
@@ -293,6 +294,11 @@ class BackfillSavedPaymentMethods extends Command
     /**
      * Create a saved card payment method from decrypted data.
      *
+     * Uses the QuickPayments two-step tokenization flow because the direct
+     * /merchants/{key}/tokens/cards endpoint returns 404 for our merchant.
+     * The QP flow uses /api/quickpayments/qp-tokens (one-time token) then
+     * /api/quickpayments/tokens (convert to reusable token), which works.
+     *
      * @param  array  $paymentData  Decrypted card data (number, expiry, cvv, name)
      */
     protected function createCardMethod(
@@ -302,26 +308,96 @@ class BackfillSavedPaymentMethods extends Command
     ): CustomerPaymentMethod {
         $cardNumber = preg_replace('/\D/', '', $paymentData['number'] ?? '');
 
+        // Normalize expiry to MM/YY before parsing — legacy imports stored
+        // raw spreadsheet values like "9/1/2030" or "Aug-30" instead of "MM/YY"
+        $expiry = $this->normalizeExpiry($paymentData['expiry'] ?? '');
+
         // Parse expiry from MM/YY format
-        $expParts = explode('/', $paymentData['expiry'] ?? '');
+        $expParts = explode('/', $expiry);
         $expMonth = isset($expParts[0]) ? (int) $expParts[0] : 12;
         $expYear = isset($expParts[1]) ? (int) $expParts[1] : (int) date('Y');
         if ($expYear < 100) {
             $expYear += 2000;
         }
 
-        return $service->createFromCardDetails(
+        $cardDetails = [
+            'number' => $cardNumber,
+            'exp_month' => $expMonth,
+            'exp_year' => $expYear,
+            'cvc' => $paymentData['cvv'] ?? '',
+            'name' => $paymentData['name'] ?? '',
+        ];
+
+        // Step 1: Create one-time QuickPayments token from raw card data
+        $qpService = app(QuickPaymentsService::class);
+        $qpResponse = $qpService->createQpToken($cardDetails);
+        $qpToken = $qpResponse['QuickPaymentsToken'] ?? null;
+
+        if (! $qpToken) {
+            throw new \RuntimeException('Failed to create QuickPayments token for card ****'.substr($cardNumber, -4));
+        }
+
+        // Step 2: Convert QP token to reusable token and create CustomerPaymentMethod
+        $lastFour = substr($cardNumber, -4);
+        $brand = CustomerPaymentMethod::detectCardBrand($cardNumber);
+
+        return $service->createFromQuickPaymentsToken(
             $customer,
+            $qpToken,
+            CustomerPaymentMethod::TYPE_CARD,
             [
-                'number' => $cardNumber,
+                'last_four' => $lastFour,
+                'brand' => $brand,
                 'exp_month' => $expMonth,
                 'exp_year' => $expYear,
-                'cvc' => $paymentData['cvv'] ?? '',
-                'name' => $paymentData['name'] ?? '',
             ],
-            null, // No nickname
             false // Not default
         );
+    }
+
+    /**
+     * Normalize a card expiry value to MM/YY format.
+     *
+     * Legacy imports stored raw spreadsheet values in the encrypted token
+     * instead of normalizing to MM/YY first. Observed formats:
+     * - "9/1/2030"  (M/D/YYYY — Excel date)
+     * - "Aug-30"    (Mon-YY — Excel short date)
+     * - "12/28"     (MM/YY — already correct)
+     * - "0930"      (MMYY — no separator)
+     *
+     * @param  string  $expiry  Raw expiry value from decrypted token
+     * @return string Normalized MM/YY string
+     */
+    protected function normalizeExpiry(string $expiry): string
+    {
+        $expiry = trim($expiry);
+
+        // M/D/YYYY or MM/D/YYYY (e.g., "9/1/2030", "12/1/2028")
+        if (preg_match('/^(\d{1,2})\/\d{1,2}\/(\d{4})$/', $expiry, $matches)) {
+            $month = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
+            $year = substr($matches[2], -2);
+
+            return "{$month}/{$year}";
+        }
+
+        // Mon-YY (e.g., "Aug-30", "Dec-28")
+        $months = [
+            'jan' => '01', 'feb' => '02', 'mar' => '03', 'apr' => '04',
+            'may' => '05', 'jun' => '06', 'jul' => '07', 'aug' => '08',
+            'sep' => '09', 'oct' => '10', 'nov' => '11', 'dec' => '12',
+        ];
+
+        if (preg_match('/^([a-zA-Z]{3})-(\d{2,4})$/i', $expiry, $matches)) {
+            $monthNum = $months[strtolower($matches[1])] ?? null;
+            if ($monthNum) {
+                $year = substr($matches[2], -2);
+
+                return "{$monthNum}/{$year}";
+            }
+        }
+
+        // Already MM/YY, MMYY, or MM/YYYY — return as-is for existing parser
+        return $expiry;
     }
 
     /**

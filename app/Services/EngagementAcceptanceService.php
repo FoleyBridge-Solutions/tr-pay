@@ -4,6 +4,7 @@
 
 namespace App\Services;
 
+use App\Notifications\EngagementSyncFailed;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -174,6 +175,16 @@ class EngagementAcceptanceService
                     'project_description' => $projectDescription,
                 ]);
 
+                try {
+                    AdminAlertService::notifyAll(new EngagementSyncFailed(
+                        "Engagement #{$engagementKey}",
+                        (string) $engagementKey,
+                        "Could not resolve target type for template: {$templateId}"
+                    ));
+                } catch (\Exception $notifyEx) {
+                    Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+                }
+
                 return [
                     'success' => false,
                     'error' => "Could not resolve target type for template: {$templateId}",
@@ -234,6 +245,16 @@ class EngagementAcceptanceService
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+
+            try {
+                AdminAlertService::notifyAll(new EngagementSyncFailed(
+                    "Engagement #{$engagementKey}",
+                    (string) $engagementKey,
+                    $e->getMessage()
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+            }
 
             return [
                 'success' => false,
