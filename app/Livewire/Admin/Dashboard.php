@@ -4,13 +4,14 @@ namespace App\Livewire\Admin;
 
 use App\Models\Payment;
 use App\Models\PaymentPlan;
+use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
 /**
  * Admin Dashboard Component
  *
- * Displays overview statistics and recent activity.
+ * Displays overview statistics, active alerts, and recent activity.
  */
 #[Layout('layouts::admin')]
 class Dashboard extends Component
@@ -50,6 +51,28 @@ class Dashboard extends Component
     }
 
     /**
+     * Get unread notifications for the alerts section.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection
+     */
+    public function getAlerts()
+    {
+        return Auth::user()->unreadNotifications()->latest()->limit(5)->get();
+    }
+
+    /**
+     * Mark a notification as read from the dashboard.
+     */
+    public function dismissAlert(string $notificationId): void
+    {
+        $notification = Auth::user()->notifications()->find($notificationId);
+
+        if ($notification) {
+            $notification->markAsRead();
+        }
+    }
+
+    /**
      * Get recent payments.
      *
      * @return \Illuminate\Database\Eloquent\Collection
@@ -78,6 +101,7 @@ class Dashboard extends Component
     {
         return view('livewire.admin.dashboard', [
             'stats' => $this->getStats(),
+            'alerts' => $this->getAlerts(),
             'recentPayments' => $this->getRecentPayments(),
             'recentPlans' => $this->getRecentPlans(),
         ]);

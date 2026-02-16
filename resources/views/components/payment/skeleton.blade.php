@@ -21,6 +21,7 @@
 ])
 
 <div 
+    wire:key="skeleton-{{ $type }}"
     x-data="{ 
         visible: true,
         init() {

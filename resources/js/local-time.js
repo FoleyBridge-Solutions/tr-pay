@@ -91,7 +91,7 @@ customElements.define('local-time', LocalTimeElement);
  */
 document.addEventListener('livewire:init', () => {
     Livewire.hook('morph.updating', ({ el, toEl, skip }) => {
-        if (!el.tagName || !el.tagName.includes('-')) return;
+        if (el.tagName !== 'LOCAL-TIME') return;
 
         for (const attr of toEl.attributes) {
             el.setAttribute(attr.nodeName, attr.nodeValue);

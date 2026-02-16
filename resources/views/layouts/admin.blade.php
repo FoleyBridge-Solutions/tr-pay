@@ -94,15 +94,29 @@
             >
                 ACH Returns
             </flux:sidebar.item>
+
+            <flux:sidebar.item 
+                icon="bell-alert" 
+                href="{{ route('admin.notifications') }}" 
+                :current="request()->routeIs('admin.notifications*')"
+            >
+                Notifications
+            </flux:sidebar.item>
         </flux:sidebar.nav>
 
         <flux:sidebar.spacer />
 
         <flux:sidebar.nav>
             <flux:dropdown position="top" align="start" class="max-lg:hidden">
-                <flux:sidebar.profile name="{{ Auth::user()->name ?? 'Admin' }}" />
+                <flux:sidebar.profile name="{{ Auth::user()->name ?? 'Admin' }}" class="relative">
+                    <livewire:admin.notification-badge />
+                </flux:sidebar.profile>
                 
                 <flux:menu>
+                    <flux:menu.item icon="bell-alert" href="{{ route('admin.notifications') }}">
+                        Notifications
+                    </flux:menu.item>
+                    <flux:menu.separator />
                     <flux:menu.item icon="arrow-right-start-on-rectangle" href="{{ route('admin.logout') }}"
                         onclick="event.preventDefault(); document.getElementById('logout-form').submit();">
                         Logout
@@ -117,11 +131,17 @@
         <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
         
         <flux:spacer />
+
+        <livewire:admin.notification-bell />
         
         <flux:dropdown position="top" align="end">
             <flux:profile name="{{ Auth::user()->name ?? 'Admin' }}" />
             
             <flux:menu>
+                <flux:menu.item icon="bell-alert" href="{{ route('admin.notifications') }}">
+                    Notifications
+                </flux:menu.item>
+                <flux:menu.separator />
                 <flux:menu.item icon="arrow-right-start-on-rectangle" href="{{ route('admin.logout') }}"
                     onclick="event.preventDefault(); document.getElementById('logout-form').submit();">
                     Logout

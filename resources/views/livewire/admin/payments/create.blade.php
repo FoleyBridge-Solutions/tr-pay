@@ -645,11 +645,13 @@
 
                 {{-- Confirmation --}}
                 <div class="mt-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                    @if($scheduleForLater)
-                        <flux:checkbox wire:model.live="confirmed" label="I confirm this scheduled payment has been authorized by the client and a signed authorization form is on file." />
-                    @else
-                        <flux:checkbox wire:model.live="confirmed" label="I confirm this payment has been authorized by the client and a signed authorization form is on file." />
-                    @endif
+                    <flux:field variant="inline">
+                        <flux:checkbox wire:model.live="confirmed" />
+                        <flux:label>
+                            I confirm this {{ $scheduleForLater ? 'scheduled payment' : 'payment' }} has been authorized by the client and a signed authorization form is on file.
+                        </flux:label>
+                        <flux:error name="confirmed" />
+                    </flux:field>
                 </div>
 
                 <div class="flex justify-between mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-700">

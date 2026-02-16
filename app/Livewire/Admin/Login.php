@@ -54,7 +54,7 @@ class Login extends Component
 
         session()->regenerate();
 
-        $this->redirect(route('admin.dashboard'), navigate: true);
+        $this->redirect(route('admin.dashboard'));
     }
 
     /**
@@ -71,7 +71,7 @@ class Login extends Component
         session()->invalidate();
         session()->regenerateToken();
 
-        $this->redirect(route('admin.login'), navigate: true);
+        $this->redirect(route('admin.login'));
     }
 
     public function render()

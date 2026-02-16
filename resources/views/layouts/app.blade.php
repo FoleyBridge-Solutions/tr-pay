@@ -8,7 +8,6 @@
     <link rel="preconnect" href="https://fonts.bunny.net">
     <link href="https://fonts.bunny.net/css?family=inter:400,500,600&display=swap" rel="stylesheet" />
     @vite(['resources/css/app.css', 'resources/js/app.js'])
-    <script src="https://js.stripe.com/v3/"></script>
     @fluxAppearance
 </head>
 <body class="min-h-screen bg-zinc-50 dark:bg-zinc-900">

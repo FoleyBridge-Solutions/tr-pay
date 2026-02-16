@@ -9,6 +9,7 @@ use App\Livewire\Admin\Clients\PaymentMethods as ClientPaymentMethods;
 use App\Livewire\Admin\Clients\Show as ClientsShow;
 use App\Livewire\Admin\Dashboard;
 use App\Livewire\Admin\Login;
+use App\Livewire\Admin\Notifications\Index as NotificationsIndex;
 use App\Livewire\Admin\PaymentPlans\Create as PaymentPlansCreate;
 use App\Livewire\Admin\PaymentPlans\Index as PaymentPlansIndex;
 use App\Livewire\Admin\Payments\Create as PaymentsCreate;
@@ -81,6 +82,7 @@ Route::prefix('admin')->middleware(['admin'])->group(function () {
     Route::livewire('/ach', AchBatchesIndex::class)->name('admin.ach.batches.index');
     Route::livewire('/ach/batches/{batch}', AchBatchesShow::class)->name('admin.ach.batches.show');
     Route::livewire('/ach/returns', AchReturnsIndex::class)->name('admin.ach.returns.index');
+    Route::livewire('/notifications', NotificationsIndex::class)->name('admin.notifications');
 
     // Debug client grouping (protected - admin only)
     Route::get('/debug-grouping/{last4}/{name}', function ($last4, $name) {

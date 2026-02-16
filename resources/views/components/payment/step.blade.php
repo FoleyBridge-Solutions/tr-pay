@@ -38,6 +38,7 @@
 @endphp
 
 <div 
+    wire:key="step-{{ $name }}"
     x-data="{ show: true }"
     x-show="show"
     x-transition:enter="transition ease-out duration-200"
