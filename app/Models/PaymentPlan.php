@@ -4,6 +4,8 @@
 
 namespace App\Models;
 
+use App\Notifications\PaymentPlanPastDue;
+use App\Services\AdminAlertService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -361,11 +363,37 @@ class PaymentPlan extends Model
                 // No more payments left, mark as failed
                 $this->status = self::STATUS_FAILED;
                 $this->next_retry_date = null;
+
+                try {
+                    AdminAlertService::notifyAll(new PaymentPlanPastDue(
+                        $this->plan_id,
+                        $this->metadata['client_name'] ?? 'Unknown',
+                        $this->client_id,
+                        (float) $this->monthly_payment,
+                        'failed',
+                        $this->payments_failed
+                    ));
+                } catch (\Exception $notifyEx) {
+                    Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+                }
             }
         } else {
             // Schedule next retry
             $this->status = self::STATUS_PAST_DUE;
             $this->next_retry_date = $nextRetry;
+
+            try {
+                AdminAlertService::notifyAll(new PaymentPlanPastDue(
+                    $this->plan_id,
+                    $this->metadata['client_name'] ?? 'Unknown',
+                    $this->client_id,
+                    (float) $this->monthly_payment,
+                    'past_due',
+                    $this->payments_failed
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+            }
         }
 
         $this->save();

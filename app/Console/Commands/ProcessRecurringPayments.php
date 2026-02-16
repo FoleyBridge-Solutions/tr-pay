@@ -5,8 +5,11 @@ namespace App\Console\Commands;
 use App\Models\CustomerPaymentMethod;
 use App\Models\Payment;
 use App\Models\RecurringPayment;
+use App\Notifications\PaymentFailed;
+use App\Notifications\PracticeCsWriteFailed;
 use App\Notifications\RecurringPaymentFailed;
 use App\Repositories\PaymentRepository;
+use App\Services\AdminAlertService;
 use App\Services\PaymentService;
 use App\Services\PracticeCsPaymentWriter;
 use App\Support\AdminNotifiable;
@@ -303,6 +306,18 @@ class ProcessRecurringPayments extends Command
                 'client_id' => $recurringPayment->client_id,
             ]);
 
+            try {
+                AdminAlertService::notifyAll(new PracticeCsWriteFailed(
+                    $payment->transaction_id,
+                    $recurringPayment->client_id,
+                    (float) $payment->amount,
+                    'Cannot resolve client_KEY for recurring payment',
+                    'recurring'
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+            }
+
             return ['payment' => null];
         }
 
@@ -362,6 +377,12 @@ class ProcessRecurringPayments extends Command
             $result = $writer->writeDeferredPayment($payload);
 
             if ($result['success']) {
+                // Record that PracticeCS write succeeded
+                $metadata = $payment->metadata ?? [];
+                $metadata['practicecs_written_at'] = now()->toIso8601String();
+                $metadata['practicecs_ledger_entry_KEY'] = $result['ledger_entry_KEY'] ?? null;
+                $payment->update(['metadata' => $metadata]);
+
                 Log::info('Recurring payment written to PracticeCS', [
                     'payment_id' => $payment->id,
                     'recurring_payment_id' => $recurringPayment->id,
@@ -375,6 +396,18 @@ class ProcessRecurringPayments extends Command
                     'recurring_payment_id' => $recurringPayment->id,
                     'error' => $result['error'],
                 ]);
+
+                try {
+                    AdminAlertService::notifyAll(new PracticeCsWriteFailed(
+                        $payment->transaction_id,
+                        $recurringPayment->client_id,
+                        (float) $payment->amount,
+                        $result['error'],
+                        'recurring'
+                    ));
+                } catch (\Exception $notifyEx) {
+                    Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+                }
 
                 $this->warn("  [PracticeCS] Write failed: {$result['error']}");
             }
@@ -397,6 +430,18 @@ class ProcessRecurringPayments extends Command
                     'error' => $e->getMessage(),
                 ]);
             }
+        }
+
+        try {
+            AdminAlertService::notifyAll(new PaymentFailed(
+                $recurringPayment->client_name,
+                $recurringPayment->client_id,
+                (float) $recurringPayment->amount,
+                $errorMessage,
+                'recurring'
+            ));
+        } catch (\Exception $e) {
+            Log::warning('Failed to send admin notification', ['error' => $e->getMessage()]);
         }
     }
 }

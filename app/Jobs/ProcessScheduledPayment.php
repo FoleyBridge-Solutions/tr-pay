@@ -4,8 +4,11 @@ namespace App\Jobs;
 
 use App\Models\Payment;
 use App\Models\PaymentPlan;
+use App\Notifications\PaymentFailed;
 use App\Notifications\PaymentPlanPaymentFailed;
+use App\Notifications\PracticeCsWriteFailed;
 use App\Repositories\PaymentRepository;
+use App\Services\AdminAlertService;
 use App\Services\PaymentService;
 use App\Services\PracticeCsPaymentWriter;
 use App\Support\AdminNotifiable;
@@ -218,6 +221,18 @@ class ProcessScheduledPayment implements ShouldQueue
                 ]);
             }
         }
+
+        try {
+            AdminAlertService::notifyAll(new PaymentFailed(
+                $this->paymentPlan->metadata['client_name'] ?? 'Unknown',
+                $this->paymentPlan->client_id,
+                (float) $this->paymentPlan->monthly_payment,
+                $errorMessage,
+                'plan_installment'
+            ));
+        } catch (\Exception $e) {
+            Log::warning('Failed to send admin notification', ['error' => $e->getMessage()]);
+        }
     }
 
     /**
@@ -292,6 +307,18 @@ class ProcessScheduledPayment implements ShouldQueue
                         'plan_id' => $this->paymentPlan->plan_id,
                         'error' => $result['error'] ?? 'Unknown error',
                     ]);
+
+                    try {
+                        AdminAlertService::notifyAll(new PracticeCsWriteFailed(
+                            $payment->transaction_id,
+                            $this->paymentPlan->client_id,
+                            $amount,
+                            $result['error'] ?? 'Unknown error',
+                            'plan_installment'
+                        ));
+                    } catch (\Exception $notifyEx) {
+                        Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+                    }
                 }
             }
         } catch (\Exception $e) {

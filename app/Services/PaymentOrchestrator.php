@@ -7,6 +7,8 @@ use App\Models\Customer;
 use App\Models\CustomerPaymentMethod;
 use App\Models\Payment;
 use App\Models\ProjectAcceptance;
+use App\Notifications\EngagementSyncFailed;
+use App\Notifications\PracticeCsWriteFailed;
 use App\Services\PaymentOrchestrator\PaymentResult;
 use App\Services\PaymentOrchestrator\PaymentResultBuilder;
 use App\Services\PaymentOrchestrator\ProcessPaymentCommand;
@@ -165,6 +167,11 @@ class PaymentOrchestrator
     {
         $ach = $command->achDetails;
 
+        // Generate a unique AccountNameId for Kotapay report matching.
+        // This appears as EntryID in returns/corrections reports and persists
+        // after Kotapay purges the transaction record post-batching.
+        $accountNameId = 'TP-'.bin2hex(random_bytes(4));
+
         return $this->paymentService->chargeAchWithKotapay(
             $command->customer,
             [
@@ -177,6 +184,7 @@ class PaymentOrchestrator
             $command->baseAmount(), // ACH charges base amount (no fee)
             [
                 'description' => $command->description(),
+                'account_name_id' => $accountNameId,
             ]
         );
     }
@@ -264,6 +272,8 @@ class PaymentOrchestrator
                 'unapplied' => $command->leaveUnapplied ?: null,
                 'fee_included_in_amount' => $command->feeIncludedInAmount ?: null,
                 'is_business' => $command->isAch() ? ($command->achDetails['is_business'] ?? null) : null,
+                'kotapay_account_name_id' => $isAch ? ($chargeResult['account_name_id'] ?? null) : null,
+                'kotapay_effective_date' => $isAch ? ($chargeResult['effective_date'] ?? now()->format('Y-m-d')) : null,
             ], fn ($v) => $v !== null),
         ]);
     }
@@ -429,7 +439,25 @@ class PaymentOrchestrator
                         'transaction_id' => $payment->transaction_id,
                         'error' => $result['error'] ?? 'Unknown',
                     ]);
+
+                    try {
+                        AdminAlertService::notifyAll(new PracticeCsWriteFailed(
+                            $payment->transaction_id,
+                            $payment->client_id ?? 'unknown',
+                            $command->baseAmount(),
+                            $result['error'] ?? 'Unknown PracticeCS error',
+                            'one_time'
+                        ));
+                    } catch (\Exception $notifyEx) {
+                        Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+                    }
                 } else {
+                    // Record that PracticeCS write succeeded
+                    $metadata = $payment->metadata ?? [];
+                    $metadata['practicecs_written_at'] = now()->toIso8601String();
+                    $metadata['practicecs_ledger_entry_KEY'] = $result['ledger_entry_KEY'] ?? null;
+                    $payment->update(['metadata' => $metadata]);
+
                     $builder->practiceCsWritten();
                     Log::info('Payment written to PracticeCS', [
                         'transaction_id' => $payment->transaction_id,
@@ -448,6 +476,18 @@ class PaymentOrchestrator
                 'transaction_id' => $payment->transaction_id,
                 'error' => $e->getMessage(),
             ]);
+
+            try {
+                AdminAlertService::notifyAll(new PracticeCsWriteFailed(
+                    $payment->transaction_id,
+                    $payment->client_id ?? 'unknown',
+                    $command->baseAmount(),
+                    $e->getMessage(),
+                    'one_time'
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+            }
         }
     }
 
@@ -921,6 +961,17 @@ class PaymentOrchestrator
                 'error' => $pcResult['error'] ?? 'Unknown error',
             ]);
 
+            try {
+                AdminAlertService::notifyAll(new EngagementSyncFailed(
+                    $engagementName ?? 'Unknown',
+                    (string) $engagementKey,
+                    $pcResult['error'] ?? 'Unknown error',
+                    $transactionId
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+            }
+
             return [
                 'key' => $engagementKey,
                 'success' => false,
@@ -931,6 +982,17 @@ class PaymentOrchestrator
                 'engagement_KEY' => $engagementKey,
                 'error' => $e->getMessage(),
             ]);
+
+            try {
+                AdminAlertService::notifyAll(new EngagementSyncFailed(
+                    $engagementName ?? 'Unknown',
+                    (string) $engagementKey,
+                    $e->getMessage(),
+                    $transactionId
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+            }
 
             return [
                 'key' => $engagementKey,

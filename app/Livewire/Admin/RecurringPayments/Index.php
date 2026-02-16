@@ -10,7 +10,6 @@ use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Component;
-use Livewire\WithPagination;
 
 /**
  * Recurring Payments Index Component
@@ -20,8 +19,6 @@ use Livewire\WithPagination;
 #[Layout('layouts::admin')]
 class Index extends Component
 {
-    use WithPagination;
-
     #[Url(as: 'q')]
     public string $search = '';
 
@@ -58,24 +55,6 @@ class Index extends Component
     public function boot(PaymentRepository $paymentRepo): void
     {
         $this->paymentRepo = $paymentRepo;
-    }
-
-    /**
-     * Reset pagination when filters change.
-     */
-    public function updatedSearch(): void
-    {
-        $this->resetPage();
-    }
-
-    public function updatedStatus(): void
-    {
-        $this->resetPage();
-    }
-
-    public function updatedFrequency(): void
-    {
-        $this->resetPage();
     }
 
     /**
@@ -306,13 +285,13 @@ class Index extends Component
             $query->where('frequency', $this->frequency);
         }
 
-        return $query->orderBy($this->sortField, $this->sortDirection)->paginate(20);
+        return $query->orderBy($this->sortField, $this->sortDirection)->get();
     }
 
     /**
      * Fetch live client names from PracticeCS for the given payments.
      *
-     * @param  \Illuminate\Pagination\LengthAwarePaginator  $payments
+     * @param  \Illuminate\Support\Collection  $payments
      * @return array<string, string> Map of client_id => client_name
      */
     protected function getClientNames($payments): array

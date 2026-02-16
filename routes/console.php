@@ -32,12 +32,14 @@ Artisan::command('inspire', function () {
 */
 
 // Process scheduled payment plan payments daily at 6 AM
-Schedule::command('payments:process-scheduled --force')
+$event = Schedule::command('payments:process-scheduled --force')
     ->dailyAt('06:00')
     ->withoutOverlapping()
     ->onOneServer()
-    ->emailOutputOnFailure(env('ADMIN_EMAIL'))
     ->appendOutputTo(storage_path('logs/scheduled-payments.log'));
+if (env('ADMIN_EMAIL')) {
+    $event->emailOutputOnFailure(env('ADMIN_EMAIL'));
+}
 
 // Retry any past-due payments at 2 PM (second attempt for same-day failures)
 Schedule::command('payments:process-scheduled --force')
@@ -47,12 +49,14 @@ Schedule::command('payments:process-scheduled --force')
     ->appendOutputTo(storage_path('logs/scheduled-payments.log'));
 
 // Process recurring payments daily at 7 AM
-Schedule::command('payments:process-recurring')
+$event = Schedule::command('payments:process-recurring')
     ->dailyAt('07:00')
     ->withoutOverlapping()
     ->onOneServer()
-    ->emailOutputOnFailure(env('ADMIN_EMAIL'))
     ->appendOutputTo(storage_path('logs/recurring-payments.log'));
+if (env('ADMIN_EMAIL')) {
+    $event->emailOutputOnFailure(env('ADMIN_EMAIL'));
+}
 
 // Retry failed recurring payments at 3 PM (second attempt)
 Schedule::command('payments:process-recurring')
@@ -61,14 +65,27 @@ Schedule::command('payments:process-recurring')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/recurring-payments.log'));
 
-// Check ACH payment settlement status daily at 10 PM
-// ACH payments take 2-3 business days to settle; this polls Kotapay for updates
-Schedule::command('payments:check-ach-status')
+// Check ACH payment settlement status — morning run at 6:30 AM
+// Settles payments whose effective date has arrived, catches early returns
+$event = Schedule::command('payments:check-ach-status')
+    ->dailyAt('06:30')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/ach-status-checks.log'));
+if (env('ADMIN_EMAIL')) {
+    $event->emailOutputOnFailure(env('ADMIN_EMAIL'));
+}
+
+// Check ACH payment settlement status — evening run at 10 PM
+// Catches returns posted later in the day
+$event = Schedule::command('payments:check-ach-status')
     ->dailyAt('22:00')
     ->withoutOverlapping()
     ->onOneServer()
-    ->emailOutputOnFailure(env('ADMIN_EMAIL'))
     ->appendOutputTo(storage_path('logs/ach-status-checks.log'));
+if (env('ADMIN_EMAIL')) {
+    $event->emailOutputOnFailure(env('ADMIN_EMAIL'));
+}
 
 /*
 |--------------------------------------------------------------------------

@@ -586,8 +586,11 @@ class RecurringPaymentImportService
     {
         $cardNumber = preg_replace('/\D/', '', $row['card_number']);
 
+        // Normalize expiry to MM/YY before parsing — spreadsheet imports may
+        // contain full dates like "9/1/2030" or "Aug-30" instead of "MM/YY"
+        $expiry = $this->normalizeExpiry(trim($row['card_expiry']));
+
         // Parse expiry from various formats (MM/YY, MMYY, MM/YYYY)
-        $expiry = trim($row['card_expiry']);
         $expMonth = null;
         $expYear = null;
 
@@ -640,6 +643,51 @@ class RecurringPaymentImportService
             null, // No nickname
             false // Not default
         );
+    }
+
+    /**
+     * Normalize a card expiry value to MM/YY format.
+     *
+     * Spreadsheet imports may contain raw date values instead of MM/YY.
+     * Observed formats:
+     * - "9/1/2030"  (M/D/YYYY — Excel date)
+     * - "Aug-30"    (Mon-YY — Excel short date)
+     * - "12/28"     (MM/YY — already correct)
+     * - "0930"      (MMYY — no separator)
+     *
+     * @param  string  $expiry  Raw expiry value from CSV
+     * @return string Normalized MM/YY string
+     */
+    protected function normalizeExpiry(string $expiry): string
+    {
+        $expiry = trim($expiry);
+
+        // M/D/YYYY or MM/D/YYYY (e.g., "9/1/2030", "12/1/2028")
+        if (preg_match('/^(\d{1,2})\/\d{1,2}\/(\d{4})$/', $expiry, $matches)) {
+            $month = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
+            $year = substr($matches[2], -2);
+
+            return "{$month}/{$year}";
+        }
+
+        // Mon-YY (e.g., "Aug-30", "Dec-28")
+        $months = [
+            'jan' => '01', 'feb' => '02', 'mar' => '03', 'apr' => '04',
+            'may' => '05', 'jun' => '06', 'jul' => '07', 'aug' => '08',
+            'sep' => '09', 'oct' => '10', 'nov' => '11', 'dec' => '12',
+        ];
+
+        if (preg_match('/^([a-zA-Z]{3})-(\d{2,4})$/i', $expiry, $matches)) {
+            $monthNum = $months[strtolower($matches[1])] ?? null;
+            if ($monthNum) {
+                $year = substr($matches[2], -2);
+
+                return "{$monthNum}/{$year}";
+            }
+        }
+
+        // Already MM/YY, MMYY, or MM/YYYY — return as-is for existing parser
+        return $expiry;
     }
 
     /**

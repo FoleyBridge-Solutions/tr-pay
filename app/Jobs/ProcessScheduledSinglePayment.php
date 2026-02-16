@@ -6,6 +6,9 @@ use App\Mail\PaymentReceipt;
 use App\Models\Customer;
 use App\Models\CustomerPaymentMethod;
 use App\Models\Payment;
+use App\Notifications\PaymentFailed;
+use App\Notifications\PracticeCsWriteFailed;
+use App\Services\AdminAlertService;
 use App\Services\PaymentService;
 use App\Services\PracticeCsPaymentWriter;
 use App\Support\AdminNotifiable;
@@ -112,6 +115,9 @@ class ProcessScheduledSinglePayment implements ShouldQueue
                     return;
                 }
 
+                // Generate a unique AccountNameId for Kotapay report matching
+                $accountNameId = 'TP-'.bin2hex(random_bytes(4));
+
                 $paymentService = app(PaymentService::class);
                 $achResult = $paymentService->chargeAchWithKotapay($customer, [
                     'routing_number' => $bankDetails['routing_number'],
@@ -121,6 +127,7 @@ class ProcessScheduledSinglePayment implements ShouldQueue
                     'is_business' => $savedMethod->is_business ?? false,
                 ], $chargeAmount, [
                     'description' => $this->payment->description ?? 'Scheduled payment',
+                    'account_name_id' => $accountNameId,
                 ]);
 
                 if (! $achResult['success']) {
@@ -136,10 +143,17 @@ class ProcessScheduledSinglePayment implements ShouldQueue
                     'vendor_transaction_id' => $achResult['transaction_id'] ?? null,
                 ]);
 
+                // Store AccountNameId and effective date in metadata for report matching
+                $existingMetadata = $this->payment->metadata ?? [];
+                $existingMetadata['kotapay_account_name_id'] = $achResult['account_name_id'] ?? $accountNameId;
+                $existingMetadata['kotapay_effective_date'] = $achResult['effective_date'] ?? now()->format('Y-m-d');
+                $this->payment->update(['metadata' => $existingMetadata]);
+
                 Log::info('Scheduled ACH payment submitted for processing', [
                     'payment_id' => $this->payment->id,
                     'transaction_id' => $this->payment->transaction_id,
                     'vendor_transaction_id' => $achResult['transaction_id'] ?? null,
+                    'account_name_id' => $accountNameId,
                     'amount' => $this->payment->amount,
                 ]);
             } else {
@@ -263,6 +277,18 @@ class ProcessScheduledSinglePayment implements ShouldQueue
                 'client_id' => $clientId,
             ]);
 
+            try {
+                AdminAlertService::notifyAll(new PracticeCsWriteFailed(
+                    $this->payment->transaction_id,
+                    $this->payment->client_id ?? 'unknown',
+                    (float) $this->payment->amount,
+                    'Cannot resolve client_KEY for scheduled payment',
+                    'scheduled'
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+            }
+
             return ['payment' => null];
         }
 
@@ -307,7 +333,25 @@ class ProcessScheduledSinglePayment implements ShouldQueue
                 'payment_id' => $this->payment->id,
                 'error' => $result['error'],
             ]);
+
+            try {
+                AdminAlertService::notifyAll(new PracticeCsWriteFailed(
+                    $this->payment->transaction_id,
+                    $this->payment->client_id ?? 'unknown',
+                    (float) $this->payment->amount,
+                    $result['error'],
+                    'scheduled'
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+            }
         } else {
+            // Record that PracticeCS write succeeded
+            $metadata = $this->payment->metadata ?? [];
+            $metadata['practicecs_written_at'] = now()->toIso8601String();
+            $metadata['practicecs_ledger_entry_KEY'] = $result['ledger_entry_KEY'] ?? null;
+            $this->payment->update(['metadata' => $metadata]);
+
             Log::info('Scheduled payment written to PracticeCS', [
                 'payment_id' => $this->payment->id,
                 'ledger_entry_KEY' => $result['ledger_entry_KEY'],
@@ -414,6 +458,19 @@ class ProcessScheduledSinglePayment implements ShouldQueue
                 'payment_id' => $this->payment->id,
                 'error' => $e->getMessage(),
             ]);
+        }
+
+        try {
+            AdminAlertService::notifyAll(new PaymentFailed(
+                $clientName,
+                $this->payment->client_id ?? 'unknown',
+                (float) $this->payment->amount,
+                $errorMessage,
+                'scheduled',
+                $this->payment->id
+            ));
+        } catch (\Exception $e) {
+            Log::warning('Failed to send admin notification', ['error' => $e->getMessage()]);
         }
     }
 

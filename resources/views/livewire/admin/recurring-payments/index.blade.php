@@ -147,10 +147,6 @@
                     @endforeach
                 </flux:table.rows>
             </flux:table>
-
-            <div class="p-4 border-t border-zinc-200 dark:border-zinc-700">
-                {{ $payments->links() }}
-            </div>
         @endif
     </flux:card>
 
