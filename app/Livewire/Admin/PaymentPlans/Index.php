@@ -4,7 +4,10 @@ namespace App\Livewire\Admin\PaymentPlans;
 
 use App\Models\AdminActivity;
 use App\Models\PaymentPlan;
+use App\Repositories\PaymentRepository;
+use Carbon\Carbon;
 use Flux\Flux;
+use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -45,6 +48,19 @@ class Index extends Component
     public bool $showCancelModal = false;
 
     public string $cancelReason = '';
+
+    public bool $showSkipModal = false;
+
+    public bool $showAdjustDateModal = false;
+
+    public string $adjustDate = '';
+
+    protected PaymentRepository $paymentRepo;
+
+    public function boot(PaymentRepository $paymentRepo): void
+    {
+        $this->paymentRepo = $paymentRepo;
+    }
 
     /**
      * Reset pagination when filters change.
@@ -141,6 +157,152 @@ class Index extends Component
     }
 
     /**
+     * Open skip confirmation modal.
+     */
+    public function confirmSkip(int $id): void
+    {
+        $this->selectedPlan = PaymentPlan::find($id);
+        $this->showSkipModal = true;
+    }
+
+    /**
+     * Reset skip modal state when closed.
+     */
+    public function resetSkipModal(): void
+    {
+        $this->showSkipModal = false;
+    }
+
+    /**
+     * Skip the next payment for the selected plan.
+     */
+    public function skipPayment(): void
+    {
+        if (! $this->selectedPlan) {
+            return;
+        }
+
+        $plan = $this->selectedPlan;
+
+        if (! $plan->canSkipPayment()) {
+            Flux::toast('This plan cannot skip any more payments.', variant: 'danger');
+
+            return;
+        }
+
+        $planId = $plan->plan_id;
+        $skippedDate = $plan->next_payment_date?->format('Y-m-d');
+
+        try {
+            $plan->skipNextPayment();
+
+            AdminActivity::log(
+                AdminActivity::ACTION_SKIPPED,
+                $plan,
+                description: "Skipped payment for plan {$planId} (was due {$skippedDate}). Plan extended by 1 month.",
+                newValues: [
+                    'plan_id' => $planId,
+                    'skipped_date' => $skippedDate,
+                    'skips_used' => $plan->skips_used,
+                    'max_skips' => PaymentPlan::MAX_SKIPS,
+                    'new_duration_months' => $plan->duration_months,
+                    'next_payment_date' => $plan->next_payment_date?->format('Y-m-d'),
+                ]
+            );
+
+            $this->showSkipModal = false;
+
+            // Refresh plan details if the modal is open
+            $this->selectedPlan = PaymentPlan::with(['payments' => function ($q) {
+                $q->orderBy('payment_number');
+            }])->find($plan->id);
+            $this->planDetails = $this->formatPlanDetails($this->selectedPlan);
+            $this->planPayments = $this->formatPlanPayments($this->selectedPlan);
+
+            Flux::toast('Payment skipped. Plan extended by 1 month.');
+        } catch (\Exception $e) {
+            Log::error('Failed to skip payment plan payment', [
+                'plan_id' => $planId,
+                'error' => $e->getMessage(),
+            ]);
+            Flux::toast('Failed to skip payment: '.$e->getMessage(), variant: 'danger');
+        }
+    }
+
+    /**
+     * Open the adjust date modal for the selected plan.
+     */
+    public function showAdjustDate(int $id): void
+    {
+        $this->selectedPlan = PaymentPlan::find($id);
+        $this->adjustDate = $this->selectedPlan?->next_payment_date?->format('Y-m-d') ?? '';
+        $this->showAdjustDateModal = true;
+    }
+
+    /**
+     * Reset adjust date modal state when closed.
+     */
+    public function resetAdjustDateModal(): void
+    {
+        $this->showAdjustDateModal = false;
+        $this->adjustDate = '';
+    }
+
+    /**
+     * Adjust the next payment date for the selected plan.
+     */
+    public function adjustPaymentDate(): void
+    {
+        if (! $this->selectedPlan) {
+            return;
+        }
+
+        $this->validate([
+            'adjustDate' => 'required|date|after:today',
+        ], [
+            'adjustDate.after' => 'The new payment date must be in the future.',
+        ]);
+
+        $plan = $this->selectedPlan;
+        $planId = $plan->plan_id;
+        $oldDate = $plan->next_payment_date?->format('Y-m-d');
+        $newDate = Carbon::parse($this->adjustDate);
+
+        try {
+            $plan->adjustNextPaymentDate($newDate);
+
+            AdminActivity::log(
+                AdminActivity::ACTION_UPDATED,
+                $plan,
+                description: "Adjusted next payment date for plan {$planId} from {$oldDate} to {$this->adjustDate}",
+                oldValues: ['next_payment_date' => $oldDate],
+                newValues: [
+                    'plan_id' => $planId,
+                    'next_payment_date' => $this->adjustDate,
+                ]
+            );
+
+            $this->showAdjustDateModal = false;
+            $this->adjustDate = '';
+
+            // Refresh plan details if the modal is open
+            $this->selectedPlan = PaymentPlan::with(['payments' => function ($q) {
+                $q->orderBy('payment_number');
+            }])->find($plan->id);
+            $this->planDetails = $this->formatPlanDetails($this->selectedPlan);
+            $this->planPayments = $this->formatPlanPayments($this->selectedPlan);
+
+            Flux::toast('Payment date adjusted successfully.');
+        } catch (\Exception $e) {
+            Log::error('Failed to adjust payment plan date', [
+                'plan_id' => $planId,
+                'error' => $e->getMessage(),
+            ]);
+            Flux::toast('Failed to adjust date: '.$e->getMessage(), variant: 'danger');
+        }
+    }
+
+    /**
      * Format plan data for Alpine display inside the modal.
      *
      * @return array<string, mixed>
@@ -163,6 +325,11 @@ class Index extends Component
             'amount_remaining' => number_format($plan->amount_remaining ?? 0, 2),
             'status' => $plan->status,
             'can_cancel' => in_array($plan->status, ['active', 'past_due']),
+            'can_skip' => $plan->canSkipPayment(),
+            'skips_used' => $plan->skips_used,
+            'max_skips' => PaymentPlan::MAX_SKIPS,
+            'next_payment_date' => $plan->next_payment_date?->toIso8601String(),
+            'has_next_payment' => $plan->next_payment_date !== null && in_array($plan->status, ['active', 'past_due']),
         ];
     }
 
@@ -192,9 +359,12 @@ class Index extends Component
     {
         $query = PaymentPlan::query();
 
-        // Search by plan ID
+        // Search by plan ID or client name (stored in metadata)
         if ($this->search) {
-            $query->where('plan_id', 'like', "%{$this->search}%");
+            $query->where(function ($q) {
+                $q->where('plan_id', 'like', "%{$this->search}%")
+                    ->orWhere('metadata', 'like', "%{$this->search}%");
+            });
         }
 
         // Filter by status
@@ -205,10 +375,39 @@ class Index extends Component
         return $query->orderBy('created_at', 'desc')->paginate(20);
     }
 
+    /**
+     * Fetch live client names from PracticeCS for the given plans.
+     *
+     * @param  \Illuminate\Contracts\Pagination\LengthAwarePaginator  $plans
+     * @return array<string, string> Map of client_id => client_name
+     */
+    protected function getClientNames($plans): array
+    {
+        $clientIds = collect($plans->items())->pluck('client_id')->unique()->filter()->values()->toArray();
+
+        if (empty($clientIds)) {
+            return [];
+        }
+
+        try {
+            return $this->paymentRepo->getClientNames($clientIds);
+        } catch (\Exception $e) {
+            Log::warning('Failed to fetch live client names from PracticeCS for payment plans', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
+    }
+
     public function render()
     {
+        $plans = $this->getPlans();
+        $clientNames = $this->getClientNames($plans);
+
         return view('livewire.admin.payment-plans.index', [
-            'plans' => $this->getPlans(),
+            'plans' => $plans,
+            'clientNames' => $clientNames,
         ]);
     }
 }

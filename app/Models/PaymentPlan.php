@@ -50,6 +50,7 @@ use Illuminate\Support\Facades\Log;
  * @property array|null $invoice_references
  * @property array|null $metadata
  * @property int|null $recurring_payment_day
+ * @property int $skips_used
  */
 class PaymentPlan extends Model
 {
@@ -63,6 +64,11 @@ class PaymentPlan extends Model
     public const STATUS_PAST_DUE = 'past_due';
 
     public const STATUS_FAILED = 'failed';
+
+    /**
+     * Maximum number of payments that can be skipped per plan.
+     */
+    public const MAX_SKIPS = 2;
 
     /**
      * The attributes that are mass assignable.
@@ -99,6 +105,7 @@ class PaymentPlan extends Model
         'invoice_references',
         'metadata',
         'recurring_payment_day',
+        'skips_used',
     ];
 
     /**
@@ -129,6 +136,7 @@ class PaymentPlan extends Model
             'invoice_references' => 'array',
             'metadata' => 'array',
             'recurring_payment_day' => 'integer',
+            'skips_used' => 'integer',
         ];
     }
 
@@ -461,6 +469,159 @@ class PaymentPlan extends Model
             'payments_completed' => $this->payments_completed,
             'payments_failed' => $this->payments_failed,
             'next_payment_date' => $this->next_payment_date->format('Y-m-d'),
+        ]);
+    }
+
+    /**
+     * Check if the plan can have its next payment skipped.
+     *
+     * A payment can be skipped if the plan is active (or past_due),
+     * has a next_payment_date, has remaining payments, and
+     * has not exceeded the maximum skip limit.
+     */
+    public function canSkipPayment(): bool
+    {
+        return in_array($this->status, [self::STATUS_ACTIVE, self::STATUS_PAST_DUE])
+            && $this->next_payment_date !== null
+            && $this->skips_used < self::MAX_SKIPS
+            && $this->payments_completed < $this->duration_months;
+    }
+
+    /**
+     * Skip the next scheduled payment.
+     *
+     * Extends the plan by one month: increments duration_months,
+     * marks the current pending Payment as "skipped", creates a new
+     * pending Payment at the end, and advances next_payment_date.
+     *
+     * @throws \RuntimeException If the plan cannot be skipped
+     */
+    public function skipNextPayment(): void
+    {
+        if (! $this->canSkipPayment()) {
+            throw new \RuntimeException('This payment plan cannot skip any more payments.');
+        }
+
+        // Find the pending payment record for the current next_payment_date
+        $pendingPayment = $this->payments()
+            ->where('status', Payment::STATUS_PENDING)
+            ->where('payment_number', $this->payments_completed + 1)
+            ->first();
+
+        // Mark it as skipped
+        if ($pendingPayment) {
+            $pendingPayment->status = Payment::STATUS_SKIPPED;
+            $pendingPayment->save();
+        }
+
+        // Extend the plan by one month
+        $this->duration_months++;
+        $this->skips_used++;
+
+        // Renumber all remaining pending payments after the skipped one
+        $remainingPayments = $this->payments()
+            ->where('status', Payment::STATUS_PENDING)
+            ->orderBy('payment_number')
+            ->get();
+
+        $nextNumber = $this->payments_completed + 1;
+        foreach ($remainingPayments as $payment) {
+            $payment->payment_number = $nextNumber;
+
+            // Recalculate scheduled date for this payment number
+            $scheduledDate = $this->start_date->copy()->addMonthsNoOverflow($nextNumber);
+            if ($this->recurring_payment_day) {
+                $day = max(1, min(31, $this->recurring_payment_day));
+                $scheduledDate->day(min($day, $scheduledDate->daysInMonth));
+            }
+            $payment->scheduled_date = $scheduledDate;
+            $payment->save();
+
+            $nextNumber++;
+        }
+
+        // Create the new pending payment at the end of the extended schedule
+        $newPaymentNumber = $this->duration_months;
+        $newScheduledDate = $this->start_date->copy()->addMonthsNoOverflow($newPaymentNumber);
+        if ($this->recurring_payment_day) {
+            $day = max(1, min(31, $this->recurring_payment_day));
+            $newScheduledDate->day(min($day, $newScheduledDate->daysInMonth));
+        }
+
+        // Get the informational fee from plan metadata (if credit card NCA was applied)
+        $feePerPayment = (float) ($this->metadata['fee_per_payment'] ?? 0);
+
+        $this->payments()->create([
+            'customer_id' => $this->customer_id,
+            'client_id' => $this->client_id,
+            'transaction_id' => 'scheduled_'.$this->plan_id.'_'.$newPaymentNumber,
+            'amount' => $this->monthly_payment,
+            'fee' => $feePerPayment,
+            'total_amount' => $this->monthly_payment,
+            'payment_method' => $this->payment_method_type,
+            'payment_method_last_four' => $this->payment_method_last_four,
+            'status' => Payment::STATUS_PENDING,
+            'scheduled_date' => $newScheduledDate,
+            'payment_number' => $newPaymentNumber,
+            'is_automated' => true,
+            'scheduled_at' => now(),
+        ]);
+
+        // Clear retry fields if in past_due state
+        $this->next_retry_date = null;
+        $this->original_due_date = null;
+        $this->last_attempt_at = null;
+        $this->status = self::STATUS_ACTIVE;
+
+        // Advance next_payment_date to the next pending payment
+        $this->next_payment_date = $this->calculateNextPaymentDate();
+
+        $this->save();
+
+        Log::info('Skipped payment plan installment', [
+            'plan_id' => $this->plan_id,
+            'skips_used' => $this->skips_used,
+            'new_duration_months' => $this->duration_months,
+            'next_payment_date' => $this->next_payment_date?->format('Y-m-d'),
+        ]);
+    }
+
+    /**
+     * Adjust the next payment date to a new date.
+     *
+     * Updates both the plan's next_payment_date and the corresponding
+     * pending Payment record's scheduled_date.
+     *
+     * @param  Carbon  $newDate  The new payment date (must be in the future)
+     *
+     * @throws \InvalidArgumentException If the date is not in the future
+     */
+    public function adjustNextPaymentDate(Carbon $newDate): void
+    {
+        if ($newDate->lte(today())) {
+            throw new \InvalidArgumentException('The new payment date must be in the future.');
+        }
+
+        $oldDate = $this->next_payment_date?->copy();
+
+        // Update the corresponding pending Payment record
+        $pendingPayment = $this->payments()
+            ->where('status', Payment::STATUS_PENDING)
+            ->where('payment_number', $this->payments_completed + 1)
+            ->first();
+
+        if ($pendingPayment) {
+            $pendingPayment->scheduled_date = $newDate;
+            $pendingPayment->save();
+        }
+
+        $this->next_payment_date = $newDate;
+        $this->save();
+
+        Log::info('Adjusted payment plan next payment date', [
+            'plan_id' => $this->plan_id,
+            'old_date' => $oldDate?->format('Y-m-d'),
+            'new_date' => $newDate->format('Y-m-d'),
         ]);
     }
 

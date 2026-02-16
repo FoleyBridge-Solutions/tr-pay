@@ -49,6 +49,8 @@ class AdminActivity extends Model
 
     public const ACTION_IMPORTED = 'imported';
 
+    public const ACTION_SKIPPED = 'skipped';
+
     /**
      * The attributes that are mass assignable.
      *
@@ -248,6 +250,7 @@ class AdminActivity extends Model
             self::ACTION_VIEWED => 'Viewed',
             self::ACTION_EXPORTED => 'Exported',
             self::ACTION_IMPORTED => 'Imported',
+            self::ACTION_SKIPPED => 'Skipped',
             default => ucfirst($this->action),
         };
     }

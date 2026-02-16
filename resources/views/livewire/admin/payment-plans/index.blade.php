@@ -15,7 +15,7 @@
             <div class="flex-1">
                 <flux:input 
                     wire:model.live.debounce.300ms="search" 
-                    placeholder="Search by plan ID..." 
+                    placeholder="Search by customer name or plan ID..." 
                     icon="magnifying-glass"
                 />
             </div>
@@ -46,7 +46,7 @@
         @else
             <flux:table>
                 <flux:table.columns>
-                    <flux:table.column>Plan ID</flux:table.column>
+                    <flux:table.column>Customer</flux:table.column>
                     <flux:table.column>Amount</flux:table.column>
                     <flux:table.column>Duration</flux:table.column>
                     <flux:table.column>Progress</flux:table.column>
@@ -58,7 +58,13 @@
                     @foreach($plans as $plan)
                         <flux:table.row wire:key="plan-{{ $plan->id }}">
                             <flux:table.cell>
-                                <span class="font-mono text-sm">{{ Str::limit($plan->plan_id, 20) }}</span>
+                                <div>
+                                    <a href="{{ route('admin.clients.show', $plan->client_id) }}"
+                                       class="font-medium text-blue-600 hover:text-blue-800 hover:underline dark:text-blue-400 dark:hover:text-blue-300">
+                                        {{ $clientNames[$plan->client_id] ?? $plan->metadata['client_name'] ?? $plan->customer?->name ?? 'Unknown' }}
+                                    </a>
+                                    <span class="text-zinc-400 text-xs block font-mono">{{ Str::limit($plan->plan_id, 20) }}</span>
+                                </div>
                             </flux:table.cell>
                             <flux:table.cell>
                                 <div>
@@ -207,7 +213,10 @@
                                     <template x-if="p.status === 'failed'">
                                         <span class="inline-flex items-center rounded-md bg-red-50 dark:bg-red-500/10 px-2 py-1 text-xs font-medium text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-600/20">Failed</span>
                                     </template>
-                                    <template x-if="p.status !== 'completed' && p.status !== 'pending' && p.status !== 'failed'">
+                                    <template x-if="p.status === 'skipped'">
+                                        <span class="inline-flex items-center rounded-md bg-zinc-50 dark:bg-zinc-500/10 px-2 py-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 ring-1 ring-inset ring-zinc-400/20">Skipped</span>
+                                    </template>
+                                    <template x-if="p.status !== 'completed' && p.status !== 'pending' && p.status !== 'failed' && p.status !== 'skipped'">
                                         <span class="inline-flex items-center rounded-md bg-zinc-50 dark:bg-zinc-500/10 px-2 py-1 text-xs font-medium text-zinc-700 dark:text-zinc-400 ring-1 ring-inset ring-zinc-600/20" x-text="p.status ? p.status.charAt(0).toUpperCase() + p.status.slice(1) : ''"></span>
                                     </template>
                                 </td>
@@ -217,15 +226,30 @@
                 </table>
             </div>
 
-            <div class="mt-6 flex justify-end gap-2">
-                <template x-if="d.can_cancel">
-                    <flux:button x-on:click="$wire.confirmCancel(d.id)" variant="danger">
-                        Cancel Plan
-                    </flux:button>
-                </template>
-                <flux:modal.close>
-                    <flux:button variant="ghost">Close</flux:button>
-                </flux:modal.close>
+            <div class="mt-6 flex justify-between">
+                <div class="flex gap-2">
+                    <template x-if="d.can_skip">
+                        <flux:button x-on:click="$wire.confirmSkip(d.id)" variant="ghost" icon="forward">
+                            Skip Next Payment
+                            <span class="ml-1 text-xs text-zinc-400" x-text="'(' + d.skips_used + '/' + d.max_skips + ' used)'"></span>
+                        </flux:button>
+                    </template>
+                    <template x-if="d.has_next_payment">
+                        <flux:button x-on:click="$wire.showAdjustDate(d.id)" variant="ghost" icon="calendar">
+                            Adjust Date
+                        </flux:button>
+                    </template>
+                </div>
+                <div class="flex gap-2">
+                    <template x-if="d.can_cancel">
+                        <flux:button x-on:click="$wire.confirmCancel(d.id)" variant="danger">
+                            Cancel Plan
+                        </flux:button>
+                    </template>
+                    <flux:modal.close>
+                        <flux:button variant="ghost">Close</flux:button>
+                    </flux:modal.close>
+                </div>
             </div>
         </div>
     </flux:modal>
@@ -249,6 +273,70 @@
                 </flux:modal.close>
                 <flux:button wire:click="cancelPlan" variant="danger">
                     Cancel Plan
+                </flux:button>
+            </div>
+        </div>
+    </flux:modal>
+
+    {{-- Skip Payment Confirmation Modal --}}
+    <flux:modal wire:model.self="showSkipModal" class="max-w-md" :dismissible="false" @close="resetSkipModal">
+        <div class="p-6">
+            <flux:heading size="lg" class="mb-2">Skip Next Payment</flux:heading>
+            <flux:text class="text-zinc-500 mb-4">
+                Skipping this payment will extend the plan by one month. The monthly payment amount stays the same, and an additional installment will be added at the end of the schedule.
+            </flux:text>
+
+            @if($selectedPlan)
+                <div class="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-lg p-3 mb-4">
+                    <div class="flex items-center gap-2 text-amber-700 dark:text-amber-400 text-sm">
+                        <flux:icon name="exclamation-triangle" class="w-4 h-4" />
+                        <span>
+                            Skips used: {{ $selectedPlan->skips_used }}/{{ App\Models\PaymentPlan::MAX_SKIPS }}.
+                            After this skip, {{ App\Models\PaymentPlan::MAX_SKIPS - $selectedPlan->skips_used - 1 }} skip(s) remaining.
+                        </span>
+                    </div>
+                </div>
+            @endif
+
+            <div class="flex justify-end gap-2">
+                <flux:modal.close>
+                    <flux:button variant="ghost">Cancel</flux:button>
+                </flux:modal.close>
+                <flux:button wire:click="skipPayment" variant="primary">
+                    Skip Payment
+                </flux:button>
+            </div>
+        </div>
+    </flux:modal>
+
+    {{-- Adjust Payment Date Modal --}}
+    <flux:modal wire:model.self="showAdjustDateModal" class="max-w-md" :dismissible="false" @close="resetAdjustDateModal">
+        <div class="p-6">
+            <flux:heading size="lg" class="mb-2">Adjust Next Payment Date</flux:heading>
+            <flux:text class="text-zinc-500 mb-4">
+                Change the date for the next upcoming payment. This only affects the next scheduled payment.
+            </flux:text>
+
+            @if($selectedPlan?->next_payment_date)
+                <div class="text-sm text-zinc-500 mb-3">
+                    Current date: <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ $selectedPlan->next_payment_date->format('M j, Y') }}</span>
+                </div>
+            @endif
+
+            <flux:field class="mb-4">
+                <flux:label>New Payment Date</flux:label>
+                <flux:input type="date" wire:model="adjustDate" min="{{ now()->addDay()->format('Y-m-d') }}" />
+                @error('adjustDate')
+                    <flux:error>{{ $message }}</flux:error>
+                @enderror
+            </flux:field>
+
+            <div class="flex justify-end gap-2">
+                <flux:modal.close>
+                    <flux:button variant="ghost">Cancel</flux:button>
+                </flux:modal.close>
+                <flux:button wire:click="adjustPaymentDate" variant="primary">
+                    Update Date
                 </flux:button>
             </div>
         </div>

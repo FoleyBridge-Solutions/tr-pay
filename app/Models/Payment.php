@@ -54,6 +54,8 @@ class Payment extends Model
 
     public const STATUS_RETURNED = 'returned';
 
+    public const STATUS_SKIPPED = 'skipped';
+
     /**
      * The attributes that are mass assignable.
      *

@@ -273,20 +273,34 @@
                 </div>
             </template>
 
-            <div class="mt-6 flex justify-end gap-2">
-                <template x-if="d.status === 'active'">
-                    <flux:button x-on:click="$wire.pausePayment(d.id)" variant="ghost">
-                        Pause
-                    </flux:button>
-                </template>
-                <template x-if="d.status === 'paused'">
-                    <flux:button x-on:click="$wire.resumePayment(d.id)" variant="primary">
-                        Resume
-                    </flux:button>
-                </template>
-                <flux:modal.close>
-                    <flux:button variant="ghost">Close</flux:button>
-                </flux:modal.close>
+            <div class="mt-6 flex justify-between">
+                <div class="flex gap-2">
+                    <template x-if="d.can_skip">
+                        <flux:button x-on:click="$wire.confirmSkip(d.id)" variant="ghost" icon="forward">
+                            Skip Next Payment
+                        </flux:button>
+                    </template>
+                    <template x-if="d.can_adjust_date">
+                        <flux:button x-on:click="$wire.showAdjustDate(d.id)" variant="ghost" icon="calendar">
+                            Adjust Date
+                        </flux:button>
+                    </template>
+                </div>
+                <div class="flex gap-2">
+                    <template x-if="d.status === 'active'">
+                        <flux:button x-on:click="$wire.pausePayment(d.id)" variant="ghost">
+                            Pause
+                        </flux:button>
+                    </template>
+                    <template x-if="d.status === 'paused'">
+                        <flux:button x-on:click="$wire.resumePayment(d.id)" variant="primary">
+                            Resume
+                        </flux:button>
+                    </template>
+                    <flux:modal.close>
+                        <flux:button variant="ghost">Close</flux:button>
+                    </flux:modal.close>
+                </div>
             </div>
         </div>
     </flux:modal>
@@ -305,6 +319,89 @@
                 </flux:modal.close>
                 <flux:button wire:click="cancelPayment" variant="danger">
                     Cancel Payment
+                </flux:button>
+            </div>
+        </div>
+    </flux:modal>
+
+    {{-- Skip Payment Confirmation Modal --}}
+    <flux:modal wire:model.self="showSkipModal" class="max-w-md" :dismissible="false" @close="resetSkipModal">
+        <div class="p-6">
+            <flux:heading size="lg" class="mb-2">Skip Next Payment</flux:heading>
+            <flux:text class="text-zinc-500 mb-4">
+                The next scheduled payment will be skipped and the date will advance to the following interval. This counts toward the total occurrences{{ $selectedPaymentId ? '' : '' }}.
+            </flux:text>
+
+            @php
+                $skipPayment = $selectedPaymentId ? App\Models\RecurringPayment::find($selectedPaymentId) : null;
+            @endphp
+
+            @if($skipPayment)
+                <div class="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-3 mb-4 space-y-1 text-sm">
+                    <div class="flex justify-between">
+                        <span class="text-zinc-500">Client:</span>
+                        <span class="font-medium">{{ $skipPayment->client_name }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-zinc-500">Amount being skipped:</span>
+                        <span class="font-medium">${{ number_format($skipPayment->amount, 2) }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-zinc-500">Scheduled for:</span>
+                        <span class="font-medium">{{ $skipPayment->next_payment_date?->format('M j, Y') }}</span>
+                    </div>
+                    @if($skipPayment->max_occurrences)
+                        <div class="flex justify-between">
+                            <span class="text-zinc-500">Occurrences after skip:</span>
+                            <span class="font-medium">{{ $skipPayment->payments_completed + 1 }}/{{ $skipPayment->max_occurrences }}</span>
+                        </div>
+                    @endif
+                </div>
+            @endif
+
+            <div class="flex justify-end gap-2">
+                <flux:modal.close>
+                    <flux:button variant="ghost">Cancel</flux:button>
+                </flux:modal.close>
+                <flux:button wire:click="skipPayment" variant="primary">
+                    Skip Payment
+                </flux:button>
+            </div>
+        </div>
+    </flux:modal>
+
+    {{-- Adjust Payment Date Modal --}}
+    <flux:modal wire:model.self="showAdjustDateModal" class="max-w-md" :dismissible="false" @close="resetAdjustDateModal">
+        <div class="p-6">
+            <flux:heading size="lg" class="mb-2">Adjust Next Payment Date</flux:heading>
+            <flux:text class="text-zinc-500 mb-4">
+                Change the date for the next upcoming payment. This only affects the next scheduled payment.
+            </flux:text>
+
+            @php
+                $adjustPayment = $selectedPaymentId ? App\Models\RecurringPayment::find($selectedPaymentId) : null;
+            @endphp
+
+            @if($adjustPayment?->next_payment_date)
+                <div class="text-sm text-zinc-500 mb-3">
+                    Current date: <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ $adjustPayment->next_payment_date->format('M j, Y') }}</span>
+                </div>
+            @endif
+
+            <flux:field class="mb-4">
+                <flux:label>New Payment Date</flux:label>
+                <flux:input type="date" wire:model="adjustDate" min="{{ now()->addDay()->format('Y-m-d') }}" />
+                @error('adjustDate')
+                    <flux:error>{{ $message }}</flux:error>
+                @enderror
+            </flux:field>
+
+            <div class="flex justify-end gap-2">
+                <flux:modal.close>
+                    <flux:button variant="ghost">Cancel</flux:button>
+                </flux:modal.close>
+                <flux:button wire:click="adjustPaymentDate" variant="primary">
+                    Update Date
                 </flux:button>
             </div>
         </div>

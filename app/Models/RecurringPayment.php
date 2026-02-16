@@ -6,6 +6,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Log;
 
 /**
  * RecurringPayment Model
@@ -317,6 +318,74 @@ class RecurringPayment extends Model
         $this->save();
 
         return $payment;
+    }
+
+    /**
+     * Skip the next scheduled payment.
+     *
+     * Advances next_payment_date to the following interval without charging.
+     * The skip counts toward max_occurrences (payments_completed is incremented).
+     * If the limit is reached after skipping, the recurring payment is completed.
+     *
+     * @throws \RuntimeException If the payment cannot be skipped
+     */
+    public function skipNextPayment(): void
+    {
+        if (! $this->isActive() || ! $this->next_payment_date) {
+            throw new \RuntimeException('This recurring payment cannot be skipped.');
+        }
+
+        $skippedDate = $this->next_payment_date->copy();
+
+        // Count toward max_occurrences
+        $this->payments_completed++;
+
+        // Calculate next payment date
+        $nextDate = $this->calculateNextPaymentDate();
+
+        if ($nextDate) {
+            $this->next_payment_date = $nextDate;
+        } else {
+            // Reached limit — mark as completed
+            $this->status = self::STATUS_COMPLETED;
+            $this->next_payment_date = null;
+        }
+
+        $this->save();
+
+        Log::info('Skipped recurring payment', [
+            'id' => $this->id,
+            'client_name' => $this->client_name,
+            'skipped_date' => $skippedDate->format('Y-m-d'),
+            'next_payment_date' => $this->next_payment_date?->format('Y-m-d'),
+            'payments_completed' => $this->payments_completed,
+        ]);
+    }
+
+    /**
+     * Adjust the next payment date to a new date.
+     *
+     * @param  Carbon  $newDate  The new payment date (must be in the future)
+     *
+     * @throws \InvalidArgumentException If the date is not in the future
+     */
+    public function adjustNextPaymentDate(Carbon $newDate): void
+    {
+        if ($newDate->lte(today())) {
+            throw new \InvalidArgumentException('The new payment date must be in the future.');
+        }
+
+        $oldDate = $this->next_payment_date?->copy();
+
+        $this->next_payment_date = $newDate;
+        $this->save();
+
+        Log::info('Adjusted recurring payment next payment date', [
+            'id' => $this->id,
+            'client_name' => $this->client_name,
+            'old_date' => $oldDate?->format('Y-m-d'),
+            'new_date' => $newDate->format('Y-m-d'),
+        ]);
     }
 
     /**

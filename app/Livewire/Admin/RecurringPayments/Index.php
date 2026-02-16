@@ -5,6 +5,7 @@ namespace App\Livewire\Admin\RecurringPayments;
 use App\Models\AdminActivity;
 use App\Models\RecurringPayment;
 use App\Repositories\PaymentRepository;
+use Carbon\Carbon;
 use Flux\Flux;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Layout;
@@ -49,6 +50,12 @@ class Index extends Component
     public array $recurringHistory = [];
 
     public bool $showCancelModal = false;
+
+    public bool $showSkipModal = false;
+
+    public bool $showAdjustDateModal = false;
+
+    public string $adjustDate = '';
 
     protected PaymentRepository $paymentRepo;
 
@@ -200,6 +207,8 @@ class Index extends Component
             'description' => $payment->description,
             'status' => $payment->status,
             'has_history' => $payment->payments && $payment->payments->count() > 0,
+            'can_skip' => $payment->isActive() && $payment->next_payment_date !== null,
+            'can_adjust_date' => $payment->next_payment_date !== null && in_array($payment->status, ['active', 'paused']),
         ];
     }
 
@@ -260,6 +269,141 @@ class Index extends Component
             $this->showCancelModal = false;
             $this->selectedPaymentId = null;
             Flux::toast('Recurring payment cancelled.');
+        }
+    }
+
+    /**
+     * Open skip confirmation modal for a recurring payment.
+     */
+    public function confirmSkip(int $id): void
+    {
+        $this->selectedPaymentId = $id;
+        $this->showSkipModal = true;
+    }
+
+    /**
+     * Reset skip modal state when closed.
+     */
+    public function resetSkipModal(): void
+    {
+        $this->showSkipModal = false;
+    }
+
+    /**
+     * Skip the next payment for the selected recurring payment.
+     */
+    public function skipPayment(): void
+    {
+        $payment = $this->selectedPaymentId ? RecurringPayment::find($this->selectedPaymentId) : null;
+
+        if (! $payment || ! $payment->isActive() || ! $payment->next_payment_date) {
+            Flux::toast('This recurring payment cannot be skipped.', variant: 'danger');
+
+            return;
+        }
+
+        $clientName = $payment->client_name;
+        $skippedDate = $payment->next_payment_date->format('Y-m-d');
+
+        try {
+            $payment->skipNextPayment();
+
+            AdminActivity::log(
+                AdminActivity::ACTION_SKIPPED,
+                $payment,
+                description: "Skipped recurring payment for {$clientName} (was due {$skippedDate})",
+                newValues: [
+                    'id' => $payment->id,
+                    'client_name' => $clientName,
+                    'skipped_date' => $skippedDate,
+                    'amount' => $payment->amount,
+                    'frequency' => $payment->frequency,
+                    'payments_completed' => $payment->payments_completed,
+                    'next_payment_date' => $payment->next_payment_date?->format('Y-m-d'),
+                    'status' => $payment->status,
+                ]
+            );
+
+            $this->showSkipModal = false;
+            $this->selectedPaymentId = null;
+
+            Flux::toast("Skipped payment for {$clientName}. Next payment date updated.");
+        } catch (\Exception $e) {
+            Log::error('Failed to skip recurring payment', [
+                'id' => $payment->id,
+                'error' => $e->getMessage(),
+            ]);
+            Flux::toast('Failed to skip payment: '.$e->getMessage(), variant: 'danger');
+        }
+    }
+
+    /**
+     * Open the adjust date modal for a recurring payment.
+     */
+    public function showAdjustDate(int $id): void
+    {
+        $this->selectedPaymentId = $id;
+        $payment = RecurringPayment::find($id);
+        $this->adjustDate = $payment?->next_payment_date?->format('Y-m-d') ?? '';
+        $this->showAdjustDateModal = true;
+    }
+
+    /**
+     * Reset adjust date modal state when closed.
+     */
+    public function resetAdjustDateModal(): void
+    {
+        $this->showAdjustDateModal = false;
+        $this->adjustDate = '';
+    }
+
+    /**
+     * Adjust the next payment date for the selected recurring payment.
+     */
+    public function adjustPaymentDate(): void
+    {
+        $payment = $this->selectedPaymentId ? RecurringPayment::find($this->selectedPaymentId) : null;
+
+        if (! $payment) {
+            return;
+        }
+
+        $this->validate([
+            'adjustDate' => 'required|date|after:today',
+        ], [
+            'adjustDate.after' => 'The new payment date must be in the future.',
+        ]);
+
+        $clientName = $payment->client_name;
+        $oldDate = $payment->next_payment_date?->format('Y-m-d');
+        $newDate = Carbon::parse($this->adjustDate);
+
+        try {
+            $payment->adjustNextPaymentDate($newDate);
+
+            AdminActivity::log(
+                AdminActivity::ACTION_UPDATED,
+                $payment,
+                description: "Adjusted next payment date for {$clientName} from {$oldDate} to {$this->adjustDate}",
+                oldValues: ['next_payment_date' => $oldDate],
+                newValues: [
+                    'id' => $payment->id,
+                    'client_name' => $clientName,
+                    'next_payment_date' => $this->adjustDate,
+                ]
+            );
+
+            $this->showAdjustDateModal = false;
+            $this->adjustDate = '';
+            $this->selectedPaymentId = null;
+
+            Flux::toast("Payment date adjusted for {$clientName}.");
+        } catch (\Exception $e) {
+            Log::error('Failed to adjust recurring payment date', [
+                'id' => $payment->id,
+                'error' => $e->getMessage(),
+            ]);
+            Flux::toast('Failed to adjust date: '.$e->getMessage(), variant: 'danger');
         }
     }
 
