@@ -109,7 +109,7 @@
                             <flux:table>
                                 <flux:table.columns>
                                     <flux:table.column>
-                                        <flux:checkbox wire:model.live="clientSelectAll.{{ $clientKey }}" label="Pay All" />
+                                        <flux:checkbox.all label="Pay All" />
                                     </flux:table.column>
                                     <flux:table.column>Invoice #</flux:table.column>
                                     <flux:table.column>Date</flux:table.column>

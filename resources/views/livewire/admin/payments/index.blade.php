@@ -117,7 +117,16 @@
                             </flux:table.cell>
                             <flux:table.cell>
                                 @if($payment->payment_plan_id)
-                                    <flux:badge color="blue" size="sm">Plan #{{ $payment->payment_number }}</flux:badge>
+                                    <div>
+                                        <flux:badge color="blue" size="sm">{{ Str::limit($payment->paymentPlan?->plan_id ?? 'Plan', 16) }}</flux:badge>
+                                        <span class="text-zinc-500 text-xs block mt-0.5">
+                                            @if($payment->payment_number)
+                                                {{ $payment->payment_number }} of {{ $payment->paymentPlan?->duration_months ?? '?' }}
+                                            @else
+                                                Down Payment
+                                            @endif
+                                        </span>
+                                    </div>
                                 @else
                                     <span class="text-zinc-400">-</span>
                                 @endif
@@ -218,7 +227,7 @@
                 <template x-if="d.has_plan">
                     <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">
                         <span class="text-zinc-500">Payment Plan</span>
-                        <span x-text="'Payment ' + (d.payment_number ?? '') + ' of ' + (d.plan_duration ?? '')"></span>
+                        <span x-text="d.payment_number ? ('Installment ' + d.payment_number + ' of ' + (d.plan_duration ?? '')) : 'Down Payment'"></span>
                     </div>
                 </template>
                 <div class="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-700">

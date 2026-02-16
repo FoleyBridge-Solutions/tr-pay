@@ -88,6 +88,17 @@ trait HasInvoiceManagement
     }
 
     /**
+     * Handle Livewire's automatic update when selectedInvoices changes via wire:model.
+     *
+     * Called by Livewire when the checkbox group bound to selectedInvoices
+     * adds or removes values. Recalculates totals to keep them in sync.
+     */
+    public function updatedSelectedInvoices(): void
+    {
+        $this->calculateTotals();
+    }
+
+    /**
      * Calculate totals based on current selection.
      *
      * Must be implemented by the consuming component, as the calculation
