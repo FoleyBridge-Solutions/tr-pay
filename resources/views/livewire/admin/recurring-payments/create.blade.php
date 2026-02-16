@@ -73,55 +73,7 @@
                 <flux:card>
                     <div class="p-6">
                         <flux:heading size="md" class="mb-4">Client</flux:heading>
-
-                        @if($selectedClient)
-                            <div class="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-4 flex items-center justify-between">
-                                <div>
-                                    <flux:text class="font-medium">{{ $selectedClient['client_name'] }}</flux:text>
-                                    <flux:text class="text-sm text-zinc-500">ID: {{ $selectedClient['client_id'] }}</flux:text>
-                                </div>
-                                <flux:button wire:click="clearClient" variant="ghost" size="sm" icon="x-mark">
-                                    Change
-                                </flux:button>
-                            </div>
-                        @else
-                            <div class="flex gap-4 mb-4">
-                                <div class="w-48">
-                                    <flux:select wire:model.live="searchType">
-                                        <option value="name">By Name</option>
-                                        <option value="client_id">By Client ID</option>
-                                        <option value="tax_id">By Tax ID (Last 4)</option>
-                                    </flux:select>
-                                </div>
-                                <div class="flex-1">
-                                    <flux:input
-                                        wire:model="searchQuery"
-                                        wire:keydown.enter="searchClients"
-                                        placeholder="{{ $searchType === 'name' ? 'Enter client name...' : ($searchType === 'client_id' ? 'Enter client ID...' : 'Enter last 4 digits of SSN/EIN...') }}"
-                                        icon="magnifying-glass"
-                                        maxlength="{{ $searchType === 'tax_id' ? '4' : '' }}"
-                                    />
-                                </div>
-                                <flux:button wire:click="searchClients" type="button">
-                                    Search
-                                </flux:button>
-                            </div>
-
-                            @if(count($searchResults) > 0)
-                                <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
-                                    @foreach($searchResults as $client)
-                                        <button
-                                            type="button"
-                                            wire:click="selectClient('{{ $client['client_id'] }}')"
-                                            class="w-full px-4 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700 last:border-b-0"
-                                        >
-                                            <span class="font-medium">{{ $client['client_name'] }}</span>
-                                            <span class="text-zinc-500 text-sm ml-2">{{ $client['client_id'] }}</span>
-                                        </button>
-                                    @endforeach
-                                </div>
-                            @endif
-                        @endif
+                        <livewire:admin.client-search mode="compact" :show-selected="true" :selected-client="$selectedClient" />
                     </div>
                 </flux:card>
 

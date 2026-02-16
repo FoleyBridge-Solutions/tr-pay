@@ -42,60 +42,7 @@
         <flux:card class="max-w-3xl">
             <div class="p-6">
                 <flux:heading size="lg" class="mb-4">Search for Client</flux:heading>
-
-                <div class="flex gap-4 mb-4">
-                    <div class="w-48">
-                        <flux:select wire:model.live="searchType">
-                            <option value="name">By Name</option>
-                            <option value="client_id">By Client ID</option>
-                            <option value="tax_id">By Tax ID (Last 4)</option>
-                        </flux:select>
-                    </div>
-                    <div class="flex-1">
-                        <flux:input
-                            wire:model="searchQuery"
-                            wire:keydown.enter="searchClients"
-                            placeholder="{{ $searchType === 'name' ? 'Enter client name...' : ($searchType === 'client_id' ? 'Enter client ID...' : 'Enter last 4 digits of SSN/EIN...') }}"
-                            icon="magnifying-glass"
-                            maxlength="{{ $searchType === 'tax_id' ? '4' : '' }}"
-                        />
-                    </div>
-                    <flux:button wire:click="searchClients" variant="primary">
-                        Search
-                    </flux:button>
-                </div>
-
-                {{-- Search Results --}}
-                @if(count($searchResults) > 0)
-                    <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
-                        <flux:table>
-                            <flux:table.columns>
-                                <flux:table.column>Client ID</flux:table.column>
-                                <flux:table.column>Name</flux:table.column>
-                                <flux:table.column>Tax ID</flux:table.column>
-                                <flux:table.column></flux:table.column>
-                            </flux:table.columns>
-                            <flux:table.rows>
-                                @foreach($searchResults as $client)
-                                    <flux:table.row wire:key="client-{{ $client['client_id'] }}">
-                                        <flux:table.cell class="font-mono">{{ $client['client_id'] }}</flux:table.cell>
-                                        <flux:table.cell>{{ $client['client_name'] }}</flux:table.cell>
-                                        <flux:table.cell class="text-zinc-500">****{{ substr($client['federal_tin'] ?? '', -4) }}</flux:table.cell>
-                                        <flux:table.cell>
-                                            <flux:button wire:click="selectClient('{{ $client['client_id'] }}')" size="sm" variant="primary">
-                                                Select
-                                            </flux:button>
-                                        </flux:table.cell>
-                                    </flux:table.row>
-                                @endforeach
-                            </flux:table.rows>
-                        </flux:table>
-                    </div>
-                @elseif($searchQuery && count($searchResults) === 0)
-                    <div class="text-center py-8 text-zinc-500">
-                        No clients found matching your search.
-                    </div>
-                @endif
+                <livewire:admin.client-search mode="select" />
             </div>
         </flux:card>
     @endif
@@ -156,10 +103,7 @@
                 @else
                 <div class="flex items-center justify-between mb-4">
                     <flux:heading size="lg">Select Invoices</flux:heading>
-                    <div class="flex gap-2">
-                        <flux:button wire:click="selectAllInvoices" size="sm" variant="ghost">Select All</flux:button>
-                        <flux:button wire:click="clearSelection" size="sm" variant="ghost">Clear</flux:button>
-                    </div>
+                    <flux:button wire:click="clearSelection" size="sm" variant="ghost">Clear</flux:button>
                 </div>
 
                 @if(count($availableInvoices) === 0)
@@ -168,42 +112,41 @@
                     </div>
                 @else
                     <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden mb-4">
-                        <flux:table>
-                            <flux:table.columns>
-                                <flux:table.column class="w-10"></flux:table.column>
-                                <flux:table.column>Invoice #</flux:table.column>
-                                <flux:table.column>Date</flux:table.column>
-                                <flux:table.column>Due Date</flux:table.column>
-                                <flux:table.column>Type</flux:table.column>
-                                <flux:table.column class="text-right">Amount</flux:table.column>
-                            </flux:table.columns>
-                            <flux:table.rows>
-                                @foreach($availableInvoices as $invoice)
-                                    @php $invoiceKey = (string) $invoice['ledger_entry_KEY']; @endphp
-                                    <flux:table.row
-                                        wire:key="invoice-{{ $invoiceKey }}"
-                                        wire:click="toggleInvoice('{{ $invoiceKey }}')"
-                                        class="cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                                    >
-                                        <flux:table.cell>
-                                            <input
-                                                type="checkbox"
-                                                class="rounded border-zinc-300 text-blue-600 shadow-sm focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-700"
-                                                {{ in_array($invoiceKey, $selectedInvoices, true) ? 'checked' : '' }}
-                                                wire:click.stop="toggleInvoice('{{ $invoiceKey }}')"
-                                            />
-                                        </flux:table.cell>
-                                        <flux:table.cell class="font-mono">{{ $invoice['invoice_number'] }}</flux:table.cell>
-                                        <flux:table.cell>{{ $invoice['invoice_date'] }}</flux:table.cell>
-                                        <flux:table.cell>{{ $invoice['due_date'] }}</flux:table.cell>
-                                        <flux:table.cell>{{ $invoice['type'] }}</flux:table.cell>
-                                        <flux:table.cell class="text-right font-medium">
-                                            ${{ number_format($invoice['open_amount'], 2) }}
-                                        </flux:table.cell>
-                                    </flux:table.row>
-                                @endforeach
-                            </flux:table.rows>
-                        </flux:table>
+                        <flux:checkbox.group wire:model.live="selectedInvoices">
+                            <flux:table>
+                                <flux:table.columns>
+                                    <flux:table.column class="w-10">
+                                        <flux:checkbox.all />
+                                    </flux:table.column>
+                                    <flux:table.column>Invoice #</flux:table.column>
+                                    <flux:table.column>Date</flux:table.column>
+                                    <flux:table.column>Due Date</flux:table.column>
+                                    <flux:table.column>Type</flux:table.column>
+                                    <flux:table.column class="text-right">Amount</flux:table.column>
+                                </flux:table.columns>
+                                <flux:table.rows>
+                                    @foreach($availableInvoices as $invoice)
+                                        @php $invoiceKey = (string) $invoice['ledger_entry_KEY']; @endphp
+                                        <flux:table.row
+                                            wire:key="invoice-{{ $invoiceKey }}"
+                                            x-on:click="$el.querySelector('input[type=checkbox]')?.click()"
+                                            class="cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                                        >
+                                            <flux:table.cell x-on:click.stop>
+                                                <flux:checkbox value="{{ $invoiceKey }}" />
+                                            </flux:table.cell>
+                                            <flux:table.cell class="font-mono">{{ $invoice['invoice_number'] }}</flux:table.cell>
+                                            <flux:table.cell>{{ $invoice['invoice_date'] }}</flux:table.cell>
+                                            <flux:table.cell>{{ $invoice['due_date'] }}</flux:table.cell>
+                                            <flux:table.cell>{{ $invoice['type'] }}</flux:table.cell>
+                                            <flux:table.cell class="text-right font-medium">
+                                                ${{ number_format($invoice['open_amount'], 2) }}
+                                            </flux:table.cell>
+                                        </flux:table.row>
+                                    @endforeach
+                                </flux:table.rows>
+                            </flux:table>
+                        </flux:checkbox.group>
                     </div>
 
                     {{-- Fee Requests (EXP Engagements) Section --}}
@@ -231,10 +174,8 @@
                                     >
                                         {{-- Engagement header --}}
                                         <div class="flex items-center gap-3 p-4">
-                                            <input
-                                                type="checkbox"
-                                                class="rounded border-zinc-300 text-blue-600 shadow-sm focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-700"
-                                                {{ $isSelected ? 'checked' : '' }}
+                                            <flux:checkbox
+                                                :checked="$isSelected"
                                                 wire:click.stop="toggleEngagement({{ $engagementKey }})"
                                             />
                                             <div class="flex-1 min-w-0">

@@ -4,7 +4,6 @@ namespace App\Livewire\Admin\Payments;
 
 use App\Livewire\Admin\Concerns\HasInvoiceManagement;
 use App\Livewire\Admin\Concerns\HasSavedPaymentMethodSelection;
-use App\Livewire\Admin\Concerns\SearchesClients;
 use App\Livewire\Admin\Concerns\ValidatesPaymentMethod;
 use App\Models\AdminActivity;
 use App\Models\Customer;
@@ -19,7 +18,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Layout;
-use Livewire\Attributes\Url;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
@@ -38,7 +37,6 @@ class Create extends Component
 {
     use HasInvoiceManagement;
     use HasSavedPaymentMethodSelection;
-    use SearchesClients;
     use ValidatesPaymentMethod;
 
     // Wizard state
@@ -47,15 +45,6 @@ class Create extends Component
     public const TOTAL_STEPS = 3;
 
     // Step 1: Client Search
-    #[Url]
-    public ?string $client = null;
-
-    public string $searchType = 'name'; // 'name', 'client_id', or 'tax_id'
-
-    public string $searchQuery = '';
-
-    public array $searchResults = [];
-
     public ?array $selectedClient = null;
 
     // Step 2: Invoice Selection & Amount
@@ -133,10 +122,7 @@ class Create extends Component
 
     public function mount(): void
     {
-        // If client query param provided, pre-select the client
-        if ($this->client) {
-            $this->selectClient($this->client);
-        }
+        // Client pre-selection is handled by the ClientSearch component via URL params
     }
 
     /**
@@ -231,10 +217,14 @@ class Create extends Component
     }
 
     /**
-     * Select a client and load their invoices.
+     * Handle client selection from the ClientSearch component.
+     *
+     * @param  array  $client  Client data from PracticeCS
      */
-    public function selectClient(string $clientId): void
+    #[On('client-selected')]
+    public function selectClient(array $client): void
     {
+        $clientId = $client['client_id'];
         $this->errorMessage = null;
 
         try {
@@ -923,8 +913,6 @@ class Create extends Component
     {
         $this->reset([
             'currentStep',
-            'searchQuery',
-            'searchResults',
             'selectedClient',
             'availableInvoices',
             'selectedInvoices',
@@ -957,6 +945,7 @@ class Create extends Component
         $this->currentStep = 1;
         $this->paymentMethodType = 'card';
         $this->savedPaymentMethods = collect();
+        $this->dispatch('reset-client-search');
     }
 
     /**

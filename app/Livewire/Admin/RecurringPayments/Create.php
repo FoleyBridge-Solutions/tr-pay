@@ -3,7 +3,6 @@
 namespace App\Livewire\Admin\RecurringPayments;
 
 use App\Livewire\Admin\Concerns\HasSavedPaymentMethodSelection;
-use App\Livewire\Admin\Concerns\SearchesClients;
 use App\Livewire\Admin\Concerns\ValidatesPaymentMethod;
 use App\Models\AdminActivity;
 use App\Models\Customer;
@@ -16,6 +15,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
 
@@ -28,16 +28,9 @@ use Livewire\Component;
 class Create extends Component
 {
     use HasSavedPaymentMethodSelection;
-    use SearchesClients;
     use ValidatesPaymentMethod;
 
     // Client selection
-    public string $searchType = 'name'; // 'name', 'client_id', or 'tax_id'
-
-    public string $searchQuery = '';
-
-    public array $searchResults = [];
-
     public ?array $selectedClient = null;
 
     // Payment details
@@ -104,27 +97,23 @@ class Create extends Component
     }
 
     /**
-     * Select a client.
+     * Handle client selection from the ClientSearch component.
+     *
+     * @param  array  $client  Client data from PracticeCS
      */
-    public function selectClient(string $clientId): void
+    #[On('client-selected')]
+    public function selectClient(array $client): void
     {
-        foreach ($this->searchResults as $client) {
-            if ($client['client_id'] == $clientId) {
-                $this->selectedClient = $client;
-                $this->searchResults = [];
-                $this->searchQuery = '';
+        $this->selectedClient = $client;
 
-                // Load saved payment methods for this client
-                $this->loadSavedPaymentMethods();
-
-                return;
-            }
-        }
+        // Load saved payment methods for this client
+        $this->loadSavedPaymentMethods();
     }
 
     /**
      * Clear selected client.
      */
+    #[On('client-cleared')]
     public function clearClient(): void
     {
         $this->selectedClient = null;
@@ -448,6 +437,7 @@ class Create extends Component
         $this->accountType = 'checking';
         $this->startDate = now()->format('Y-m-d');
         $this->savedPaymentMethods = collect();
+        $this->dispatch('reset-client-search');
     }
 
     public function render()
