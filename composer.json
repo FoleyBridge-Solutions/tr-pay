@@ -10,6 +10,7 @@
         "doctrine/dbal": "^4.3",
         "foleybridgesolutions/kotapay-cashier": "dev-main",
         "foleybridgesolutions/mipaymentchoice-cashier": "dev-main",
+        "foleybridgesolutions/practicecs-pi": "^1.0",
         "laravel/framework": "^12.0",
         "laravel/tinker": "^2.10.1",
         "livewire/flux": "^2.6",
@@ -95,6 +96,13 @@
     "minimum-stability": "dev",
     "prefer-stable": true,
     "repositories": {
+        "foleybridgesolutions/practicecs-pi": {
+            "type": "path",
+            "url": "/var/www/practicecs-pi",
+            "options": {
+                "symlink": true
+            }
+        },
         "flux-pro": {
             "type": "composer",
             "url": "https://composer.fluxui.dev"

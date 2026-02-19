@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "27230cb7e70064fc981d8401cf4299b2",
+    "content-hash": "63aca10e6f2c1ad142d609ccd1c6f1c4",
     "packages": [
         {
             "name": "brick/math",
@@ -876,6 +876,64 @@
                 "issues": "https://github.com/FoleyBridge-Solutions/mipaymentchoice-cashier/issues"
             },
             "time": "2026-02-18T01:37:01+00:00"
+        },
+        {
+            "name": "foleybridgesolutions/practicecs-pi",
+            "version": "1.0.0",
+            "dist": {
+                "type": "path",
+                "url": "/var/www/practicecs-pi",
+                "reference": "53f08503e74c0270b08dfcf80d77d1505ddb71b4"
+            },
+            "require": {
+                "guzzlehttp/guzzle": "^7.2",
+                "illuminate/http": "^10.0|^11.0|^12.0",
+                "illuminate/support": "^10.0|^11.0|^12.0",
+                "php": "^8.1"
+            },
+            "require-dev": {
+                "orchestra/testbench": "^8.0|^9.0|^10.0",
+                "phpunit/phpunit": "^10.0"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "FoleyBridgeSolutions\\PracticeCsPI\\PracticeCsServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "FoleyBridgeSolutions\\PracticeCsPI\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "FoleyBridgeSolutions\\PracticeCsPI\\Tests\\": "tests/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "FoleyBridge Solutions",
+                    "email": "dev@foleybridgesolutions.com"
+                }
+            ],
+            "description": "PracticeCS Programming Interface - Laravel client for the PracticeCS API",
+            "keywords": [
+                "accounting",
+                "api-client",
+                "laravel",
+                "practice-management",
+                "practicecs"
+            ],
+            "transport-options": {
+                "symlink": true,
+                "relative": false
+            }
         },
         {
             "name": "fruitcake/php-cors",

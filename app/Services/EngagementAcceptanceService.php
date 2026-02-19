@@ -5,102 +5,54 @@
 namespace App\Services;
 
 use App\Notifications\EngagementSyncFailed;
-use Illuminate\Support\Facades\DB;
+use FoleyBridgeSolutions\PracticeCsPI\Exceptions\PracticeCsException;
+use FoleyBridgeSolutions\PracticeCsPI\Services\EngagementService;
 use Illuminate\Support\Facades\Log;
 
 /**
  * EngagementAcceptanceService
  *
- * Handles the acceptance of EXPANSION engagements in PracticeCS.
- * When a client pays for a proposed project, this service updates
- * the engagement type from EXPANSION to the appropriate target type.
+ * Handles the acceptance of EXPANSION engagements in PracticeCS via the
+ * practicecs-pi package API. When a client pays for a proposed project,
+ * this service delegates to EngagementService to update the engagement
+ * type from EXPANSION to the appropriate target type.
  *
  * Business Logic:
  * - EXPANSION (type 3) engagements are "proposed work" that clients must accept
  * - Each EXPANSION engagement has a template (e.g., EXPTAX, EXPREP) that indicates
  *   what type of engagement it should become when accepted
- * - Upon payment, the engagement_type_KEY is updated to convert the proposal
- *   into an active engagement
+ * - Upon payment, the API handles the type resolution and changeset audit trail
  *
  * Year-Based Type Resolution:
- * - Some templates (EXPADVISORY, EXPAYROLL, EXPBOOK, EXPSALES) map to year-specific
- *   engagement types (e.g., 2026ADVISOR, 2027PAYROLL)
- * - The tax year is determined from the first word of the project description
- * - Years >= 2026 use dynamic DB lookup for {YEAR}{SUFFIX} type IDs
- * - Years < 2026 (or unparseable) fall back to legacy non-year-based types
- * - All other templates use static mappings that don't change by year
+ * - The API handles year-based type lookup using the project description
+ * - TR-Pay passes the project description through; the API resolves the target type
  */
 class EngagementAcceptanceService
 {
     /**
-     * Static (non-year-based) template-to-type mapping.
-     * These templates always map to the same engagement_type_KEY regardless of year.
-     *
-     * @var array<string, int>
+     * The PracticeCS engagement service from the practicecs-pi package.
      */
-    private const STATIC_TEMPLATE_MAP = [
-        'EXPAUDIT' => 25, // -> AUDIT (Audit Engagement)
-        'EXPCONSULT' => 22, // -> CONSULTING (Consulting)
-        'EXPEXAM' => 24, // -> EXAM (Examination Representation)
-        'EXPFIN' => 14, // -> FINANCIALS (Reviews, Compilations & Preparations)
-        'EXPPLANNING' => 23, // -> PLANNING (Tax Planning)
-        'EXPREP' => 4,  // -> REP (Tax Debt Representation)
-        'EXPSTARTUP' => 5,  // -> STARTUP (Sales & Startup Work)
-        'EXPTAX' => 16, // -> TAXFEEREQ (Tax Work Billed Using Fee Requests)
-        'EXPVAL' => 15, // -> VALUATION (Valuation)
-
-        // Non-EXP templates that may be used with EXPANSION type
-        'TAXFEEREQ' => 16, // -> TAXFEEREQ (Tax Work Billed Using Fee Requests)
-        'GAMEPLAN' => 2,  // -> GAMEPLAN (Troubleshooting Gameplan)
-    ];
+    private EngagementService $engagementApi;
 
     /**
-     * Year-based templates mapped to their Engagement_Type ID suffix.
+     * Create a new EngagementAcceptanceService instance.
      *
-     * For years >= YEAR_BASED_THRESHOLD, we build the engagement_type_id
-     * as "{YEAR}{SUFFIX}" and look it up dynamically from the Engagement_Type table.
-     *
-     * e.g., EXPADVISORY with year 2026 -> look up "2026ADVISOR"
-     *       EXPBOOK with year 2027     -> look up "2027BOOKS"
-     *
-     * @var array<string, string>
+     * @param  EngagementService  $engagementApi  The PracticeCS engagement API service
      */
-    private const YEAR_BASED_TEMPLATE_SUFFIX = [
-        'EXPADVISORY' => 'ADVISOR',
-        'EXPAYROLL' => 'PAYROLL',
-        'EXPBOOK' => 'BOOKS',
-        'EXPSALES' => 'SALES',
-    ];
-
-    /**
-     * Legacy (pre-2026) type mapping for year-based templates.
-     * Used when the project's tax year is before YEAR_BASED_THRESHOLD
-     * or when the year cannot be determined from the project description.
-     *
-     * @var array<string, int>
-     */
-    private const LEGACY_YEAR_TYPE_MAP = [
-        'EXPADVISORY' => 21, // -> ADVISORY
-        'EXPAYROLL' => 13, // -> PAYROLL
-        'EXPBOOK' => 12, // -> BOOKKEEPING
-        'EXPSALES' => 12, // -> BOOKKEEPING (sales tax was combined with bookkeeping pre-2026)
-    ];
-
-    /**
-     * Year threshold: years >= this value use dynamic year-based type lookup.
-     * Years below this threshold use LEGACY_YEAR_TYPE_MAP.
-     */
-    private const YEAR_BASED_THRESHOLD = 2026;
-
-    /**
-     * The engagement_type_KEY for EXPANSION type
-     */
-    private const EXPANSION_TYPE_KEY = 3;
+    public function __construct(EngagementService $engagementApi)
+    {
+        $this->engagementApi = $engagementApi;
+    }
 
     /**
      * Accept an engagement by updating its type from EXPANSION to the target type
      *
      * This should be called AFTER payment is successfully processed.
+     * Delegates to the practicecs-pi EngagementService API, which handles:
+     * - Engagement lookup and EXPANSION type verification
+     * - Target type resolution (static and year-based)
+     * - Changeset creation for audit trail
+     * - The actual engagement update
      *
      * @param  int  $engagementKey  The engagement_KEY to accept
      * @param  int  $staffKey  The staff_KEY to record as the updater (for audit)
@@ -120,127 +72,49 @@ class EngagementAcceptanceService
             ];
         }
 
-        $connection = config('practicecs.payment_integration.connection', 'sqlsrv');
-
         try {
-            // 1. Get the engagement details
-            // Note: LEFT JOIN on Engagement_Type because some engagements (e.g., EXPADVISORY)
-            // have NULL engagement_type_KEY and need to be resolved by template instead.
-            $engagement = DB::connection($connection)->selectOne('
-                SELECT 
-                    E.engagement_KEY,
-                    E.engagement_type_KEY,
-                    E.engagement_template_KEY,
-                    E.update__staff_KEY,
-                    ET.engagement_type_id AS current_type_id,
-                    TM.engagement_template_id AS template_id
-                FROM Engagement E
-                LEFT JOIN Engagement_Type ET ON E.engagement_type_KEY = ET.engagement_type_KEY
-                JOIN Engagement_Template TM ON E.engagement_template_KEY = TM.engagement_template_KEY
-                WHERE E.engagement_KEY = ?
-            ', [$engagementKey]);
+            $result = $this->engagementApi->acceptEngagement($engagementKey, $staffKey, $projectDescription);
 
-            if (! $engagement) {
-                return [
-                    'success' => false,
-                    'error' => "Engagement not found: {$engagementKey}",
-                ];
-            }
-
-            // 2. Verify it's an EXPANSION type or has NULL type (e.g., EXPADVISORY template)
-            // NULL type_KEY: untyped engagement created from an EXP* template, needs conversion
-            // EXPANSION_TYPE_KEY (3): standard expansion engagement, needs conversion
-            // Anything else: already converted to a working type, skip
-            if ($engagement->engagement_type_KEY !== null
-                && $engagement->engagement_type_KEY !== self::EXPANSION_TYPE_KEY) {
-                Log::info('EngagementAcceptance: Engagement is not EXPANSION type, skipping', [
+            if ($result->success) {
+                Log::info('EngagementAcceptance: Engagement type updated successfully', [
                     'engagement_KEY' => $engagementKey,
-                    'current_type' => $engagement->current_type_id,
+                    'new_type_KEY' => $result->newTypeKey,
+                    'changeset_KEY' => $result->changesetKey,
                 ]);
-
-                return [
-                    'success' => true, // Not an error, just nothing to do
-                    'message' => 'Engagement is not an EXPANSION type',
-                ];
-            }
-
-            // 3. Resolve the target type from template + project description year
-            $templateId = $engagement->template_id;
-            $targetTypeKey = $this->resolveTargetTypeKey($templateId, $projectDescription, $connection);
-
-            if ($targetTypeKey === null) {
-                Log::error('EngagementAcceptance: Could not resolve target type', [
+            } else {
+                Log::info('EngagementAcceptance: API returned non-success', [
                     'engagement_KEY' => $engagementKey,
-                    'template_id' => $templateId,
-                    'project_description' => $projectDescription,
+                    'message' => $result->message,
+                    'error' => $result->error,
                 ]);
-
-                try {
-                    AdminAlertService::notifyAll(new EngagementSyncFailed(
-                        "Engagement #{$engagementKey}",
-                        (string) $engagementKey,
-                        "Could not resolve target type for template: {$templateId}"
-                    ));
-                } catch (\Exception $notifyEx) {
-                    Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
-                }
-
-                return [
-                    'success' => false,
-                    'error' => "Could not resolve target type for template: {$templateId}",
-                ];
             }
 
-            // 4. Begin transaction
-            DB::connection($connection)->beginTransaction();
+            return $result->toArray();
 
-            // 5. Create changeset entry for audit trail
-            $changesetKey = $this->createChangeset($connection);
-
-            // 6. Update the engagement
-            DB::connection($connection)->update('
-                UPDATE Engagement
-                SET 
-                    engagement_type_KEY = ?,
-                    update__staff_KEY = ?,
-                    update__changeset_KEY = ?
-                WHERE engagement_KEY = ?
-            ', [
-                $targetTypeKey,
-                $staffKey,
-                $changesetKey,
-                $engagementKey,
-            ]);
-
-            // 7. Close the changeset
-            $this->closeChangeset($connection, $changesetKey);
-
-            // 8. Commit
-            DB::connection($connection)->commit();
-
-            $year = $this->extractYearFromDescription($projectDescription);
-
-            Log::info('EngagementAcceptance: Engagement type updated successfully', [
+        } catch (PracticeCsException $e) {
+            Log::error('EngagementAcceptance: API call failed', [
                 'engagement_KEY' => $engagementKey,
-                'from_type' => $engagement->engagement_type_KEY ?? 'NULL',
-                'to_type' => $targetTypeKey,
-                'template_id' => $templateId,
-                'tax_year' => $year,
-                'changeset_KEY' => $changesetKey,
+                'error' => $e->getMessage(),
+                'status_code' => $e->getStatusCode(),
+                'response_body' => $e->getResponseBody(),
             ]);
+
+            try {
+                AdminAlertService::notifyAll(new EngagementSyncFailed(
+                    "Engagement #{$engagementKey}",
+                    (string) $engagementKey,
+                    $e->getMessage()
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
+            }
 
             return [
-                'success' => true,
-                'new_type_KEY' => $targetTypeKey,
-                'changeset_KEY' => $changesetKey,
+                'success' => false,
+                'error' => $e->getMessage(),
             ];
-
         } catch (\Exception $e) {
-            if (DB::connection($connection)->transactionLevel() > 0) {
-                DB::connection($connection)->rollBack();
-            }
-
-            Log::error('EngagementAcceptance: Failed to update engagement', [
+            Log::error('EngagementAcceptance: Unexpected error', [
                 'engagement_KEY' => $engagementKey,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
@@ -264,98 +138,10 @@ class EngagementAcceptanceService
     }
 
     /**
-     * Resolve the target engagement_type_KEY for a given template and project description.
-     *
-     * For static (non-year-based) templates, returns the fixed mapping.
-     * For year-based templates:
-     *   - Extracts the tax year from the first word of the project description
-     *   - Year >= 2026: dynamically looks up {YEAR}{SUFFIX} in the Engagement_Type table
-     *   - Year < 2026 or unparseable: falls back to the legacy type mapping
-     *
-     * @param  string  $templateId  The engagement_template_id (e.g., 'EXPTAX', 'EXPADVISORY')
-     * @param  string|null  $projectDescription  The project description (P.long_description)
-     * @param  string  $connection  The database connection name
-     * @return int|null The target engagement_type_KEY, or null if template is unknown
-     */
-    private function resolveTargetTypeKey(string $templateId, ?string $projectDescription, string $connection): ?int
-    {
-        // Static (non-year-based) templates — fixed mapping
-        if (isset(self::STATIC_TEMPLATE_MAP[$templateId])) {
-            return self::STATIC_TEMPLATE_MAP[$templateId];
-        }
-
-        // Year-based templates — need year resolution
-        if (! isset(self::YEAR_BASED_TEMPLATE_SUFFIX[$templateId])) {
-            return null; // Unknown template
-        }
-
-        $year = $this->extractYearFromDescription($projectDescription);
-
-        if ($year !== null && $year >= self::YEAR_BASED_THRESHOLD) {
-            // Dynamic lookup: query Engagement_Type for {YEAR}{SUFFIX}
-            $suffix = self::YEAR_BASED_TEMPLATE_SUFFIX[$templateId];
-            $typeId = $year.$suffix;
-
-            $type = DB::connection($connection)->selectOne(
-                'SELECT engagement_type_KEY FROM Engagement_Type WHERE engagement_type_id = ?',
-                [$typeId]
-            );
-
-            if ($type) {
-                Log::debug('EngagementAcceptance: Resolved year-based type', [
-                    'template_id' => $templateId,
-                    'year' => $year,
-                    'type_id' => $typeId,
-                    'type_KEY' => $type->engagement_type_KEY,
-                ]);
-
-                return $type->engagement_type_KEY;
-            }
-
-            // Year-based type doesn't exist in DB yet — fall back to legacy
-            Log::warning('EngagementAcceptance: Year-based type not found in DB, falling back to legacy', [
-                'template_id' => $templateId,
-                'expected_type_id' => $typeId,
-                'year' => $year,
-            ]);
-        } else {
-            Log::debug('EngagementAcceptance: Using legacy type mapping', [
-                'template_id' => $templateId,
-                'year' => $year,
-                'reason' => $year === null ? 'year not parseable from description' : 'year below threshold',
-            ]);
-        }
-
-        // Fall back to legacy (pre-2026) mapping
-        return self::LEGACY_YEAR_TYPE_MAP[$templateId] ?? null;
-    }
-
-    /**
-     * Extract a 4-digit tax year from the first word of a project description.
-     *
-     * Project descriptions are expected to start with the tax year,
-     * e.g., "2026 Monthly Bookkeeping" -> 2026
-     *
-     * @param  string|null  $description  The project description (P.long_description)
-     * @return int|null The extracted year, or null if not parseable
-     */
-    private function extractYearFromDescription(?string $description): ?int
-    {
-        if (empty($description)) {
-            return null;
-        }
-
-        $firstWord = strtok(trim($description), " \t\n\r");
-
-        if ($firstWord !== false && preg_match('/^\d{4}$/', $firstWord)) {
-            return (int) $firstWord;
-        }
-
-        return null;
-    }
-
-    /**
      * Accept multiple engagements (batch operation)
+     *
+     * Uses the batch API endpoint for efficiency when accepting multiple
+     * engagements. Falls back to individual calls if the batch API fails.
      *
      * @param  array<int, int>  $engagementKeys  Array of engagement_KEYs to accept
      * @param  int  $staffKey  The staff_KEY to record as the updater
@@ -363,6 +149,94 @@ class EngagementAcceptanceService
      * @return array{success: bool, results: array}
      */
     public function acceptEngagements(array $engagementKeys, int $staffKey, array $projectDescriptions = []): array
+    {
+        if (! config('practicecs.payment_integration.enabled')) {
+            Log::warning('EngagementAcceptance: PracticeCS integration disabled, skipping batch', [
+                'engagement_KEYs' => $engagementKeys,
+            ]);
+
+            $results = [];
+            foreach ($engagementKeys as $key) {
+                $results[$key] = [
+                    'success' => false,
+                    'error' => 'PracticeCS integration is disabled',
+                ];
+            }
+
+            return [
+                'success' => false,
+                'results' => $results,
+            ];
+        }
+
+        try {
+            $apiResults = $this->engagementApi->acceptEngagements($engagementKeys, $staffKey, $projectDescriptions);
+
+            $results = [];
+            $allSuccess = true;
+
+            foreach ($apiResults as $engagementKey => $result) {
+                $results[$engagementKey] = $result->toArray();
+
+                if (! $result->success && $result->message === null) {
+                    $allSuccess = false;
+                }
+            }
+
+            return [
+                'success' => $allSuccess,
+                'results' => $results,
+            ];
+
+        } catch (PracticeCsException $e) {
+            Log::error('EngagementAcceptance: Batch API call failed, falling back to individual calls', [
+                'engagement_KEYs' => $engagementKeys,
+                'error' => $e->getMessage(),
+                'status_code' => $e->getStatusCode(),
+            ]);
+
+            try {
+                AdminAlertService::notifyAll(new EngagementSyncFailed(
+                    'Batch engagement acceptance ('.count($engagementKeys).' engagements)',
+                    implode(', ', $engagementKeys),
+                    $e->getMessage()
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send EngagementSyncFailed notification', ['error' => $notifyEx->getMessage()]);
+            }
+
+            // Fall back to individual calls
+            return $this->acceptEngagementsIndividually($engagementKeys, $staffKey, $projectDescriptions);
+
+        } catch (\Exception $e) {
+            Log::error('EngagementAcceptance: Unexpected batch error, falling back to individual calls', [
+                'engagement_KEYs' => $engagementKeys,
+                'error' => $e->getMessage(),
+            ]);
+
+            try {
+                AdminAlertService::notifyAll(new EngagementSyncFailed(
+                    'Batch engagement acceptance ('.count($engagementKeys).' engagements)',
+                    implode(', ', $engagementKeys),
+                    $e->getMessage()
+                ));
+            } catch (\Exception $notifyEx) {
+                Log::warning('Failed to send EngagementSyncFailed notification', ['error' => $notifyEx->getMessage()]);
+            }
+
+            return $this->acceptEngagementsIndividually($engagementKeys, $staffKey, $projectDescriptions);
+        }
+    }
+
+    /**
+     * Accept engagements individually (fallback for batch failures).
+     *
+     * @param  array<int, int>  $engagementKeys  Array of engagement_KEYs to accept
+     * @param  int  $staffKey  The staff_KEY to record as the updater
+     * @param  array<int, string|null>  $projectDescriptions  Optional map of engagement_KEY => project description
+     * @return array{success: bool, results: array}
+     */
+    private function acceptEngagementsIndividually(array $engagementKeys, int $staffKey, array $projectDescriptions = []): array
     {
         $results = [];
         $allSuccess = true;
@@ -384,89 +258,97 @@ class EngagementAcceptanceService
     }
 
     /**
-     * Create a new changeset entry for audit trail
+     * Get the target engagement type for a template, using the API.
      *
-     * PracticeCS requires changeset entries to track all modifications.
-     * This creates a changeset that identifies the change as coming from
-     * the payment portal.
-     *
-     * @param  string  $connection  Database connection name
-     * @return int The new changeset_KEY
-     */
-    private function createChangeset(string $connection): int
-    {
-        // Generate next changeset KEY with lock
-        $nextKey = DB::connection($connection)->selectOne(
-            'SELECT ISNULL(MAX(changeset_KEY), 0) + 1 AS next_key FROM Changeset WITH (TABLOCKX)'
-        )->next_key;
-
-        // Insert changeset
-        DB::connection($connection)->insert('
-            INSERT INTO Changeset (
-                changeset_KEY,
-                begin_date_utc,
-                program_name,
-                user_name,
-                host_name,
-                resolved_end_date_utc
-            )
-            VALUES (?, GETUTCDATE(), ?, ?, ?, GETUTCDATE())
-        ', [
-            $nextKey,
-            'TR-Pay Payment Portal',
-            'PaymentPortal',
-            config('app.url', 'tr-pay'),
-        ]);
-
-        Log::debug('EngagementAcceptance: Changeset created', [
-            'changeset_KEY' => $nextKey,
-        ]);
-
-        return $nextKey;
-    }
-
-    /**
-     * Close a changeset by setting its end_date_utc
-     *
-     * @param  string  $connection  Database connection name
-     * @param  int  $changesetKey  The changeset_KEY to close
-     */
-    private function closeChangeset(string $connection, int $changesetKey): void
-    {
-        DB::connection($connection)->update('
-            UPDATE Changeset
-            SET 
-                end_date_utc = GETUTCDATE(),
-                resolved_end_date_utc = GETUTCDATE()
-            WHERE changeset_KEY = ?
-        ', [$changesetKey]);
-    }
-
-    /**
-     * Get the target engagement type for a template, using legacy (non-year-based) resolution.
-     *
-     * This method does NOT perform year-based dynamic lookup.
-     * For year-aware resolution, use resolveTargetTypeKey() via acceptEngagement().
+     * Delegates to the practicecs-pi EngagementService for type resolution.
+     * Falls back to local config template maps on API failure to preserve
+     * the original in-memory lookup behavior for static templates.
      *
      * @param  string  $templateId  The engagement_template_id (e.g., 'EXPTAX')
      * @return int|null The target engagement_type_KEY, or null if not found
      */
     public function getTargetTypeKey(string $templateId): ?int
     {
-        return self::STATIC_TEMPLATE_MAP[$templateId]
-            ?? self::LEGACY_YEAR_TYPE_MAP[$templateId]
-            ?? null;
+        try {
+            return $this->engagementApi->getTargetTypeKey($templateId);
+        } catch (PracticeCsException $e) {
+            Log::error('EngagementAcceptance: Failed to get target type key from API, using local fallback', [
+                'template_id' => $templateId,
+                'error' => $e->getMessage(),
+                'status_code' => $e->getStatusCode(),
+            ]);
+
+            return $this->getTargetTypeKeyFromConfig($templateId);
+        } catch (\Exception $e) {
+            Log::error('EngagementAcceptance: Unexpected error getting target type key, using local fallback', [
+                'template_id' => $templateId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->getTargetTypeKeyFromConfig($templateId);
+        }
     }
 
     /**
      * Check if a template ID is a known expansion template
+     *
+     * Delegates to the practicecs-pi EngagementService.
+     * Falls back to local config template maps on API failure to preserve
+     * the original in-memory lookup behavior.
      *
      * @param  string  $templateId  The engagement_template_id
      * @return bool True if this template has a known type mapping
      */
     public function isExpansionTemplate(string $templateId): bool
     {
-        return isset(self::STATIC_TEMPLATE_MAP[$templateId])
-            || isset(self::YEAR_BASED_TEMPLATE_SUFFIX[$templateId]);
+        try {
+            return $this->engagementApi->isExpansionTemplate($templateId);
+        } catch (PracticeCsException $e) {
+            Log::error('EngagementAcceptance: Failed to check expansion template via API, using local fallback', [
+                'template_id' => $templateId,
+                'error' => $e->getMessage(),
+                'status_code' => $e->getStatusCode(),
+            ]);
+
+            return $this->isExpansionTemplateFromConfig($templateId);
+        } catch (\Exception $e) {
+            Log::error('EngagementAcceptance: Unexpected error checking expansion template, using local fallback', [
+                'template_id' => $templateId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->isExpansionTemplateFromConfig($templateId);
+        }
+    }
+
+    /**
+     * Local config fallback for getTargetTypeKey().
+     *
+     * Checks static_template_map and legacy_year_type_map from local config.
+     * Cannot resolve year-based types (those require a DB lookup on the API side).
+     *
+     * @param  string  $templateId  The engagement_template_id
+     * @return int|null The target engagement_type_KEY, or null if not found
+     */
+    private function getTargetTypeKeyFromConfig(string $templateId): ?int
+    {
+        $staticMap = config('practicecs.static_template_map', []);
+        $legacyMap = config('practicecs.legacy_year_type_map', []);
+
+        return $staticMap[$templateId] ?? $legacyMap[$templateId] ?? null;
+    }
+
+    /**
+     * Local config fallback for isExpansionTemplate().
+     *
+     * @param  string  $templateId  The engagement_template_id
+     * @return bool True if this template is in the static or year-based maps
+     */
+    private function isExpansionTemplateFromConfig(string $templateId): bool
+    {
+        $staticMap = config('practicecs.static_template_map', []);
+        $yearBasedMap = config('practicecs.year_based_template_suffix', []);
+
+        return isset($staticMap[$templateId]) || isset($yearBasedMap[$templateId]);
     }
 }
