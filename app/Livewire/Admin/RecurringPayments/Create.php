@@ -4,6 +4,7 @@ namespace App\Livewire\Admin\RecurringPayments;
 
 use App\Livewire\Admin\Concerns\HasSavedPaymentMethodSelection;
 use App\Livewire\Admin\Concerns\ValidatesPaymentMethod;
+use App\Livewire\PaymentFlow\HasCardFormatting;
 use App\Models\AdminActivity;
 use App\Models\Customer;
 use App\Models\CustomerPaymentMethod;
@@ -27,6 +28,7 @@ use Livewire\Component;
 #[Layout('layouts::admin')]
 class Create extends Component
 {
+    use HasCardFormatting;
     use HasSavedPaymentMethodSelection;
     use ValidatesPaymentMethod;
 

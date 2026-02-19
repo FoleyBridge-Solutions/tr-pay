@@ -137,6 +137,12 @@ class ProcessScheduledPayment implements ShouldQueue
                 // Write installment to PracticeCS (or defer for ACH)
                 $this->writeToPracticeCs($payment, (float) $this->paymentPlan->monthly_payment, $result['transaction_id']);
 
+                // Send receipt email for card payments (ACH receipts are sent on settlement)
+                $isAch = $this->paymentPlan->payment_method_type === 'ach';
+                if (! $isAch) {
+                    $payment->sendReceipt();
+                }
+
             } else {
                 // Payment failed
                 $this->handlePaymentFailure($result['error'] ?? 'Unknown error');

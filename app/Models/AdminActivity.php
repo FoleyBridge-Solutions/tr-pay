@@ -51,6 +51,8 @@ class AdminActivity extends Model
 
     public const ACTION_SKIPPED = 'skipped';
 
+    public const ACTION_SENT = 'sent';
+
     /**
      * The attributes that are mass assignable.
      *

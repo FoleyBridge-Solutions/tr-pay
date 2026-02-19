@@ -5,6 +5,7 @@ namespace App\Livewire\Admin\Payments;
 use App\Livewire\Admin\Concerns\HasInvoiceManagement;
 use App\Livewire\Admin\Concerns\HasSavedPaymentMethodSelection;
 use App\Livewire\Admin\Concerns\ValidatesPaymentMethod;
+use App\Livewire\PaymentFlow\HasCardFormatting;
 use App\Models\AdminActivity;
 use App\Models\Customer;
 use App\Models\CustomerPaymentMethod;
@@ -35,6 +36,7 @@ use Livewire\Component;
 #[Layout('layouts::admin')]
 class Create extends Component
 {
+    use HasCardFormatting;
     use HasInvoiceManagement;
     use HasSavedPaymentMethodSelection;
     use ValidatesPaymentMethod;
@@ -99,6 +101,11 @@ class Create extends Component
     public string $accountType = 'checking';
 
     public bool $isBusiness = false;
+
+    // Save Payment Method
+    public bool $savePaymentMethod = true;
+
+    public ?string $paymentMethodNickname = null;
 
     // Confirmation
     public bool $confirmed = false;
@@ -847,6 +854,8 @@ class Create extends Component
                 leaveUnapplied: $this->leaveUnapplied,
                 selectedEngagementKeys: $this->selectedEngagements,
                 pendingEngagements: $this->pendingEngagements,
+                savePaymentMethod: $this->savePaymentMethod,
+                paymentMethodNickname: $this->paymentMethodNickname,
             );
         }
 
@@ -867,6 +876,8 @@ class Create extends Component
             leaveUnapplied: $this->leaveUnapplied,
             selectedEngagementKeys: $this->selectedEngagements,
             pendingEngagements: $this->pendingEngagements,
+            savePaymentMethod: $this->savePaymentMethod,
+            paymentMethodNickname: $this->paymentMethodNickname,
         );
     }
 

@@ -35,6 +35,11 @@
 
             <flux:checkbox wire:model="remember" label="Remember me" />
 
+            <div>
+                <x-turnstile wire:model="turnstileToken" data-action="login" data-theme="light" />
+                <flux:error name="turnstileToken" />
+            </div>
+
             <flux:button type="submit" variant="primary" class="w-full">
                 Sign in
             </flux:button>

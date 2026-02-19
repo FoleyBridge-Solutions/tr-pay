@@ -40,6 +40,14 @@
             </flux:sidebar.item>
             
             <flux:sidebar.item 
+                icon="envelope" 
+                href="{{ route('admin.payment-requests') }}" 
+                :current="request()->routeIs('admin.payment-requests*')"
+            >
+                Payment Requests
+            </flux:sidebar.item>
+            
+            <flux:sidebar.item 
                 icon="calendar" 
                 href="{{ route('admin.payment-plans') }}" 
                 :current="request()->routeIs('admin.payment-plans*')"
@@ -101,6 +109,14 @@
                 :current="request()->routeIs('admin.notifications*')"
             >
                 Notifications
+            </flux:sidebar.item>
+
+            <flux:sidebar.item 
+                icon="cloud-arrow-up" 
+                href="{{ route('admin.file-upload') }}" 
+                :current="request()->routeIs('admin.file-upload*')"
+            >
+                File Upload
             </flux:sidebar.item>
         </flux:sidebar.nav>
 

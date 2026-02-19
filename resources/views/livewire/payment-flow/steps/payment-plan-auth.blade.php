@@ -105,110 +105,22 @@
 
             {{-- Credit Card Form --}}
             @if($paymentMethod === 'credit_card')
-                <div wire:key="payment-fields-card" class="space-y-4">
-                    <flux:field>
-                        <flux:label>Card Number</flux:label>
-                        <flux:input wire:model.live="cardNumber" placeholder="1234 5678 9012 3456" maxlength="19" />
-                        <flux:error name="cardNumber" />
-                        <flux:description>Enter your 16-digit card number</flux:description>
-                    </flux:field>
-
-                    <div class="grid md:grid-cols-2 gap-4">
-                        <flux:field>
-                            <flux:label>Expiration Date</flux:label>
-                            <flux:input wire:model.live="cardExpiry" placeholder="MM/YY" maxlength="5" />
-                            <flux:error name="cardExpiry" />
-                        </flux:field>
-
-                        <flux:field>
-                            <flux:label>CVV</flux:label>
-                            <flux:input wire:model.live="cardCvv" type="password" placeholder="123" maxlength="4" />
-                            <flux:error name="cardCvv" />
-                        </flux:field>
-                    </div>
-                </div>
+                <x-payment-method-fields
+                    type="card"
+                    :show-descriptions="true"
+                />
             @elseif($paymentMethod === 'ach')
                 {{-- ACH Bank Account Form --}}
-                <div wire:key="payment-fields-ach" class="space-y-4">
-                    <flux:field>
-                        <flux:label>Bank Name</flux:label>
-                        <flux:input wire:model="bankName" placeholder="First National Bank" />
-                        <flux:error name="bankName" />
-                    </flux:field>
-
-                    <div class="grid md:grid-cols-2 gap-4">
-                        <flux:field>
-                            <flux:label>Account Number</flux:label>
-                            <flux:input wire:model="accountNumber" placeholder="123456789" maxlength="17" />
-                            <flux:error name="accountNumber" />
-                            <flux:description>8-17 digits</flux:description>
-                        </flux:field>
-
-                        <flux:field>
-                            <flux:label>Routing Number</flux:label>
-                            <flux:input wire:model="routingNumber" placeholder="123456789" maxlength="9" />
-                            <flux:error name="routingNumber" />
-                            <flux:description>9 digits</flux:description>
-                        </flux:field>
-                    </div>
-
-                    <div class="grid md:grid-cols-2 gap-4">
-                        <flux:field>
-                            <flux:label>Account Type</flux:label>
-                            <flux:select wire:model="bankAccountType">
-                                <option value="checking">Checking</option>
-                                <option value="savings">Savings</option>
-                            </flux:select>
-                            <flux:error name="bankAccountType" />
-                        </flux:field>
-
-                        <flux:field>
-                            <flux:label>Account Classification</flux:label>
-                            <flux:select wire:model="isBusiness">
-                                <option value="0">Personal Account</option>
-                                <option value="1">Business Account</option>
-                            </flux:select>
-                            <flux:error name="isBusiness" />
-                        </flux:field>
-                    </div>
-
-                    {{-- ACH Authorization for Payment Plans --}}
-                    <div class="bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg p-4 mt-4">
-                        <h4 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3">ACH Debit Authorization for Recurring Payments</h4>
-                        <div class="text-xs text-zinc-600 dark:text-zinc-400 space-y-2">
-                            <p>
-                                By providing your bank account information and proceeding with this payment plan, you authorize 
-                                <strong>{{ config('branding.company_name', 'our company') }}</strong> to electronically debit your 
-                                {{ $bankAccountType === 'savings' ? 'savings' : 'checking' }} account at the financial institution 
-                                indicated for the scheduled payment amounts on their respective due dates.
-                            </p>
-                            <p>
-                                You also authorize {{ config('branding.company_name', 'our company') }}, if necessary, to electronically 
-                                credit your account to correct erroneous debits or make payment of refunds or other related credits.
-                            </p>
-                            <p>
-                                This authorization will remain in full force and effect until the payment plan is completed or until you notify 
-                                {{ config('branding.company_name', 'our company') }} in writing that you wish to revoke this authorization.
-                                {{ config('branding.company_name', 'our company') }} requires at least <strong>five (5) business days</strong> 
-                                prior notice in order to cancel this authorization.
-                            </p>
-                        </div>
-                        <div class="mt-3">
-                            <label class="flex items-start gap-2 cursor-pointer">
-                                <input 
-                                    type="checkbox" 
-                                    wire:model="achAuthorization" 
-                                    class="mt-0.5 rounded border-zinc-300 dark:border-zinc-600 text-zinc-800 dark:text-zinc-200 focus:ring-zinc-500"
-                                    required
-                                >
-                                <span class="text-xs text-zinc-700 dark:text-zinc-300">
-                                    I authorize recurring ACH debits for this payment plan and agree to the terms above.
-                                </span>
-                            </label>
-                            <flux:error name="achAuthorization" />
-                        </div>
-                    </div>
-                </div>
+                <x-payment-method-fields
+                    type="ach"
+                    :show-bank-name="true"
+                    :show-descriptions="true"
+                    :show-ach-auth="true"
+                    :show-is-business="true"
+                    :account-type-value="$bankAccountType"
+                    ach-auth-title="ACH Debit Authorization for Recurring Payments"
+                    ach-auth-text="I authorize recurring ACH debits for this payment plan and agree to the terms above."
+                />
             @endif
         </div>
 

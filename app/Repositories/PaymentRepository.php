@@ -929,4 +929,108 @@ class PaymentRepository
         // Return as a numerically-indexed array (reset keys)
         return array_values($engagementMap);
     }
+
+    /**
+     * Get the primary email address for a client from PracticeCS.
+     *
+     * Joins Client → Contact → Contact_Email, filtering by the contact's
+     * primary__contact_email_type_KEY to find the preferred email address.
+     * Falls back to the first available email if no primary type is set.
+     *
+     * @param  string  $clientId  The human-readable client identifier
+     * @return string|null The primary email address, or null if not found
+     */
+    public function getClientEmail(string $clientId): ?string
+    {
+        // First try to get the primary email using the contact's preferred email type
+        $result = DB::connection('sqlsrv')->selectOne(
+            'SELECT CE.email
+             FROM Client C
+             JOIN Contact CO ON C.contact_KEY = CO.contact_KEY
+             JOIN Contact_Email CE ON CO.contact_KEY = CE.contact_KEY
+                 AND CO.primary__contact_email_type_KEY = CE.contact_email_type_KEY
+             WHERE C.client_id = ?',
+            [$clientId]
+        );
+
+        if ($result) {
+            return $result->email;
+        }
+
+        // Fall back to the first available email for this client's contact
+        $fallback = DB::connection('sqlsrv')->selectOne(
+            'SELECT TOP 1 CE.email
+             FROM Client C
+             JOIN Contact CO ON C.contact_KEY = CO.contact_KEY
+             JOIN Contact_Email CE ON CO.contact_KEY = CE.contact_KEY
+             WHERE C.client_id = ?
+             ORDER BY CE.contact_email_KEY',
+            [$clientId]
+        );
+
+        return $fallback?->email;
+    }
+
+    /**
+     * Get primary email addresses for multiple clients in a single batch query.
+     *
+     * Optimized for bulk operations like the email sync command.
+     * Returns a map of client_id => email for all clients that have emails.
+     *
+     * @param  array<string>  $clientIds  Array of human-readable client_id values
+     * @return array<string, string> Map of client_id => primary email
+     */
+    public function getClientEmailsBatch(array $clientIds): array
+    {
+        $clientIds = array_values(array_unique(array_filter($clientIds)));
+
+        if (empty($clientIds)) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($clientIds), '?'));
+
+        // Get primary emails (matched by contact's preferred email type)
+        $primaryResults = DB::connection('sqlsrv')->select(
+            "SELECT C.client_id, CE.email
+             FROM Client C
+             JOIN Contact CO ON C.contact_KEY = CO.contact_KEY
+             JOIN Contact_Email CE ON CO.contact_KEY = CE.contact_KEY
+                 AND CO.primary__contact_email_type_KEY = CE.contact_email_type_KEY
+             WHERE C.client_id IN ({$placeholders})",
+            $clientIds
+        );
+
+        $emails = [];
+        foreach ($primaryResults as $row) {
+            $emails[$row->client_id] = $row->email;
+        }
+
+        // For clients without a primary email match, fall back to their first email
+        $missingClientIds = array_diff($clientIds, array_keys($emails));
+
+        if (! empty($missingClientIds)) {
+            $missingPlaceholders = implode(',', array_fill(0, count($missingClientIds), '?'));
+
+            $fallbackResults = DB::connection('sqlsrv')->select(
+                "SELECT sub.client_id, sub.email
+                 FROM (
+                     SELECT C.client_id, CE.email,
+                         ROW_NUMBER() OVER (PARTITION BY C.client_id ORDER BY CE.contact_email_KEY) AS rn
+                     FROM Client C
+                     JOIN Contact CO ON C.contact_KEY = CO.contact_KEY
+                     JOIN Contact_Email CE ON CO.contact_KEY = CE.contact_KEY
+                     WHERE C.client_id IN ({$missingPlaceholders})
+                 ) sub
+                 WHERE sub.rn = 1",
+                array_values($missingClientIds)
+            );
+
+            foreach ($fallbackResults as $row) {
+                $emails[$row->client_id] = $row->email;
+            }
+        }
+
+        return $emails;
+    }
 }

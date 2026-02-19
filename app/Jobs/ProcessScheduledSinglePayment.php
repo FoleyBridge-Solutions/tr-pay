@@ -222,8 +222,10 @@ class ProcessScheduledSinglePayment implements ShouldQueue
                 }
             }
 
-            // Send success email
-            $this->sendSuccessEmail($metadata);
+            // Send success email for card payments only (ACH receipts are sent on settlement)
+            if (! $isAch) {
+                $this->sendSuccessEmail($metadata);
+            }
 
         } catch (\Exception $e) {
             Log::error('Exception processing scheduled payment', [

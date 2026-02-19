@@ -98,7 +98,8 @@ class PaymentOrchestrator
         $builder->withEngagementResults($engagementResults);
 
         // Step 8: Send receipt email (if requested — public flow only)
-        if ($command->sendReceipt) {
+        // ACH receipts are deferred until settlement confirmation via CheckAchPaymentStatus
+        if ($command->sendReceipt && ! $command->isAch()) {
             $sent = $this->trySendReceipt($command, $transactionId);
             $builder->receiptWasSent($sent);
         }

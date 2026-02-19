@@ -73,19 +73,19 @@
                 @break
 
             @case('table')
-                {{-- Invoice selection skeleton - matches actual invoice list layout --}}
+                {{-- Invoice selection skeleton - matches actual invoice-selection step layout --}}
                 <flux:skeleton.group animate="shimmer">
                     <div class="space-y-6">
-                        {{-- Account info header (matches invoice-selection step) --}}
+                        {{-- Account info header --}}
                         <div class="bg-zinc-100 dark:bg-zinc-800 p-4 rounded-lg">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
-                                    <flux:skeleton.line class="w-16 mb-2" />
-                                    <flux:skeleton.line class="w-32" />
+                                    <flux:subheading>Account</flux:subheading>
+                                    <flux:skeleton.line class="w-32 mt-1" />
                                 </div>
-                                <div class="flex flex-col items-end">
-                                    <flux:skeleton.line class="w-20 mb-2" />
-                                    <flux:skeleton.line class="w-24" />
+                                <div class="text-right">
+                                    <flux:subheading>Client ID</flux:subheading>
+                                    <flux:skeleton.line class="w-20 mt-1 ml-auto" />
                                 </div>
                             </div>
                         </div>
@@ -93,12 +93,12 @@
                         {{-- Section heading with invoice count --}}
                         <div class="flex justify-between items-center">
                             <div>
-                                <flux:skeleton.line class="w-48 mb-2" />
-                                <flux:skeleton.line class="w-64" />
+                                <flux:skeleton.line class="w-40 mb-2" />
+                                <flux:skeleton.line class="w-56" />
                             </div>
                         </div>
 
-                        {{-- Client invoice card (matches the actual bordered card layout) --}}
+                        {{-- Client invoice card (primary client style) --}}
                         <div class="bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
                             {{-- Client header --}}
                             <div class="px-6 py-4 bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-700">
@@ -112,50 +112,82 @@
                                     </div>
                                     <div class="text-right">
                                         <flux:skeleton.line class="w-24 mb-1" />
-                                        <flux:skeleton.line class="w-20" />
+                                        <flux:skeleton.line class="w-20 ml-auto" />
                                     </div>
                                 </div>
                             </div>
 
-                            {{-- Invoice table --}}
+                            {{-- Invoice table (matches actual column structure) --}}
                             <div class="p-6">
                                 <flux:table>
                                     <flux:table.columns>
-                                        <flux:table.column class="w-12"></flux:table.column>
-                                        <flux:table.column>Invoice</flux:table.column>
+                                        <flux:table.column></flux:table.column>
+                                        <flux:table.column>Invoice #</flux:table.column>
                                         <flux:table.column>Date</flux:table.column>
-                                        <flux:table.column>Due</flux:table.column>
-                                        <flux:table.column>Amount</flux:table.column>
+                                        <flux:table.column>Due Date</flux:table.column>
+                                        <flux:table.column align="end">Amount</flux:table.column>
                                     </flux:table.columns>
                                     <flux:table.rows>
-                                        @foreach(range(1, 4) as $i)
-                                            <flux:table.row>
-                                                <flux:table.cell>
-                                                    <flux:skeleton class="rounded size-5" />
-                                                </flux:table.cell>
-                                                <flux:table.cell>
-                                                    <flux:skeleton.line class="w-20" />
-                                                </flux:table.cell>
-                                                <flux:table.cell>
+                                        <flux:table.row>
+                                            <flux:table.cell>
+                                                <flux:skeleton class="rounded size-5" />
+                                            </flux:table.cell>
+                                            <flux:table.cell>
+                                                <flux:skeleton.line class="w-16" />
+                                            </flux:table.cell>
+                                            <flux:table.cell>
+                                                <flux:skeleton.line class="w-20" />
+                                            </flux:table.cell>
+                                            <flux:table.cell>
+                                                <flux:skeleton.line class="w-20" />
+                                            </flux:table.cell>
+                                            <flux:table.cell>
+                                                <div class="flex justify-end">
                                                     <flux:skeleton.line class="w-16" />
-                                                </flux:table.cell>
-                                                <flux:table.cell>
-                                                    <flux:skeleton.line class="w-16" />
-                                                </flux:table.cell>
-                                                <flux:table.cell>
-                                                    <flux:skeleton.line class="w-20" />
-                                                </flux:table.cell>
-                                            </flux:table.row>
-                                        @endforeach
+                                                </div>
+                                            </flux:table.cell>
+                                        </flux:table.row>
                                     </flux:table.rows>
                                 </flux:table>
                             </div>
                         </div>
 
-                        {{-- Footer with back and continue buttons --}}
-                        <div class="flex justify-between items-center pt-4 border-t border-zinc-200 dark:border-zinc-700">
+                        {{-- Total Account Balance --}}
+                        <div class="bg-zinc-100 dark:bg-zinc-800 p-4 rounded-lg">
+                            <div class="flex justify-between items-center">
+                                <flux:subheading>Total Account Balance:</flux:subheading>
+                                <flux:skeleton.line class="w-20" />
+                            </div>
+                        </div>
+
+                        {{-- Selected Invoices Total --}}
+                        <div class="bg-zinc-50 dark:bg-zinc-900 p-4 rounded-lg">
+                            <div class="flex justify-between items-center">
+                                <flux:skeleton.line class="w-44" />
+                                <flux:skeleton.line class="w-20" />
+                            </div>
+                            <flux:skeleton.line class="w-48 mt-2" />
+                        </div>
+
+                        {{-- Payment Amount field --}}
+                        <div class="space-y-6">
+                            <div>
+                                <flux:skeleton.line class="w-28 mb-2" />
+                                <flux:skeleton class="h-10 w-full rounded-lg" />
+                                <flux:skeleton.line class="w-64 mt-2" />
+                            </div>
+
+                            {{-- Payment Notes field --}}
+                            <div>
+                                <flux:skeleton.line class="w-40 mb-2" />
+                                <flux:skeleton class="h-20 w-full rounded-lg" />
+                            </div>
+                        </div>
+
+                        {{-- Back and Continue buttons --}}
+                        <div class="flex gap-3 pt-4">
                             <flux:skeleton class="h-10 w-20 rounded-lg" />
-                            <flux:skeleton class="h-10 w-32 rounded-lg" />
+                            <flux:skeleton class="h-10 flex-1 rounded-lg" />
                         </div>
                     </div>
                 </flux:skeleton.group>

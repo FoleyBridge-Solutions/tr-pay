@@ -33,6 +33,8 @@ class ProcessPaymentCommand
 
     public const SOURCE_ADMIN = 'tr-pay-admin';
 
+    public const SOURCE_EMAIL_REQUEST = 'tr-pay-email';
+
     /**
      * @param  string  $chargeMethod  One of: card, ach, saved, check
      * @param  Customer  $customer  The local customer record
@@ -270,6 +272,8 @@ class ProcessPaymentCommand
         bool $leaveUnapplied = false,
         array $selectedEngagementKeys = [],
         array $pendingEngagements = [],
+        bool $savePaymentMethod = false,
+        ?string $paymentMethodNickname = null,
     ): self {
         return new self(
             chargeMethod: self::CHARGE_CARD,
@@ -284,8 +288,8 @@ class ProcessPaymentCommand
             openInvoices: [],
             source: self::SOURCE_ADMIN,
             sendReceipt: false,
-            savePaymentMethod: false,
-            paymentMethodNickname: null,
+            savePaymentMethod: $savePaymentMethod,
+            paymentMethodNickname: $paymentMethodNickname,
             transactionId: null,
             cardDetails: $cardDetails,
             achDetails: null,
@@ -311,6 +315,8 @@ class ProcessPaymentCommand
         bool $leaveUnapplied = false,
         array $selectedEngagementKeys = [],
         array $pendingEngagements = [],
+        bool $savePaymentMethod = false,
+        ?string $paymentMethodNickname = null,
     ): self {
         return new self(
             chargeMethod: self::CHARGE_ACH,
@@ -325,8 +331,8 @@ class ProcessPaymentCommand
             openInvoices: [],
             source: self::SOURCE_ADMIN,
             sendReceipt: false,
-            savePaymentMethod: false,
-            paymentMethodNickname: null,
+            savePaymentMethod: $savePaymentMethod,
+            paymentMethodNickname: $paymentMethodNickname,
             transactionId: null,
             cardDetails: null,
             achDetails: $achDetails,
@@ -381,6 +387,91 @@ class ProcessPaymentCommand
             selectedEngagementKeys: $selectedEngagementKeys,
             pendingEngagements: $pendingEngagements,
             paymentMethodLabel: $isCard ? 'credit_card' : 'ach',
+        );
+    }
+
+    /**
+     * Create a command for an email request card payment (client pays via emailed link).
+     */
+    public static function emailRequestCardPayment(
+        Customer $customer,
+        float $amount,
+        float $fee,
+        array $clientInfo,
+        array $selectedInvoiceNumbers,
+        array $invoiceDetails,
+        array $openInvoices,
+        array $cardDetails,
+        bool $sendReceipt = true,
+        bool $savePaymentMethod = false,
+        ?string $paymentMethodNickname = null,
+    ): self {
+        return new self(
+            chargeMethod: self::CHARGE_CARD,
+            customer: $customer,
+            amount: $amount,
+            fee: $fee,
+            feeIncludedInAmount: false,
+            clientInfo: $clientInfo,
+            selectedInvoiceNumbers: $selectedInvoiceNumbers,
+            invoiceDetails: $invoiceDetails,
+            leaveUnapplied: false,
+            openInvoices: $openInvoices,
+            source: self::SOURCE_EMAIL_REQUEST,
+            sendReceipt: $sendReceipt,
+            savePaymentMethod: $savePaymentMethod,
+            paymentMethodNickname: $paymentMethodNickname,
+            transactionId: null,
+            cardDetails: $cardDetails,
+            achDetails: null,
+            savedMethod: null,
+            engagements: [],
+            acceptanceSignature: 'Email Request',
+            selectedEngagementKeys: [],
+            pendingEngagements: [],
+            paymentMethodLabel: 'credit_card',
+        );
+    }
+
+    /**
+     * Create a command for an email request ACH payment (client pays via emailed link).
+     */
+    public static function emailRequestAchPayment(
+        Customer $customer,
+        float $amount,
+        array $clientInfo,
+        array $selectedInvoiceNumbers,
+        array $invoiceDetails,
+        array $openInvoices,
+        array $achDetails,
+        bool $sendReceipt = true,
+        bool $savePaymentMethod = false,
+        ?string $paymentMethodNickname = null,
+    ): self {
+        return new self(
+            chargeMethod: self::CHARGE_ACH,
+            customer: $customer,
+            amount: $amount,
+            fee: 0,
+            feeIncludedInAmount: false,
+            clientInfo: $clientInfo,
+            selectedInvoiceNumbers: $selectedInvoiceNumbers,
+            invoiceDetails: $invoiceDetails,
+            leaveUnapplied: false,
+            openInvoices: $openInvoices,
+            source: self::SOURCE_EMAIL_REQUEST,
+            sendReceipt: $sendReceipt,
+            savePaymentMethod: $savePaymentMethod,
+            paymentMethodNickname: $paymentMethodNickname,
+            transactionId: null,
+            cardDetails: null,
+            achDetails: $achDetails,
+            savedMethod: null,
+            engagements: [],
+            acceptanceSignature: 'Email Request',
+            selectedEngagementKeys: [],
+            pendingEngagements: [],
+            paymentMethodLabel: 'ach',
         );
     }
 

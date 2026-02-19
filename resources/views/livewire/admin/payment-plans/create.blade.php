@@ -7,7 +7,7 @@
     {{-- Progress Steps --}}
     @if($currentStep <= 5)
         <div class="mb-8">
-            <div class="flex items-center justify-between max-w-3xl">
+            <div class="flex items-center justify-between max-w-3xl mx-auto">
                 @foreach(['Select Client', 'Select Invoices', 'Payment Method', 'Configure Plan', 'Review'] as $index => $stepName)
                     @php $stepNum = $index + 1; @endphp
                     <div class="flex items-center {{ $index < 4 ? 'flex-1' : '' }}">
@@ -39,7 +39,7 @@
 
     {{-- Step 1: Select Client --}}
     @if($currentStep === 1)
-        <flux:card class="max-w-3xl">
+        <flux:card class="max-w-3xl mx-auto">
             <div class="p-6">
                 <flux:heading size="lg" class="mb-4">Search for Client</flux:heading>
                 <livewire:admin.client-search mode="select" />
@@ -49,7 +49,7 @@
 
     {{-- Step 2: Select Invoices --}}
     @if($currentStep === 2)
-        <flux:card class="max-w-4xl">
+        <flux:card class="max-w-4xl mx-auto">
             <div class="p-6">
                 {{-- Selected Client Info --}}
                 <div class="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-4 mb-6">
@@ -78,42 +78,8 @@
                         No open invoices found for this client.
                     </div>
                 @else
-                    <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden mb-4">
-                        <flux:checkbox.group wire:model.live="selectedInvoices">
-                            <flux:table>
-                                <flux:table.columns>
-                                    <flux:table.column class="w-10">
-                                        <flux:checkbox.all />
-                                    </flux:table.column>
-                                    <flux:table.column>Invoice #</flux:table.column>
-                                    <flux:table.column>Date</flux:table.column>
-                                    <flux:table.column>Due Date</flux:table.column>
-                                    <flux:table.column>Type</flux:table.column>
-                                    <flux:table.column class="text-right">Amount</flux:table.column>
-                                </flux:table.columns>
-                                <flux:table.rows>
-                                    @foreach($availableInvoices as $invoice)
-                                        @php $invoiceKey = (string) $invoice['ledger_entry_KEY']; @endphp
-                                        <flux:table.row
-                                            wire:key="invoice-{{ $invoiceKey }}"
-                                            x-on:click="$el.querySelector('input[type=checkbox]')?.click()"
-                                            class="cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                                        >
-                                            <flux:table.cell x-on:click.stop>
-                                                <flux:checkbox value="{{ $invoiceKey }}" />
-                                            </flux:table.cell>
-                                            <flux:table.cell class="font-mono">{{ $invoice['invoice_number'] }}</flux:table.cell>
-                                            <flux:table.cell>{{ $invoice['invoice_date'] }}</flux:table.cell>
-                                            <flux:table.cell>{{ $invoice['due_date'] }}</flux:table.cell>
-                                            <flux:table.cell>{{ $invoice['type'] }}</flux:table.cell>
-                                            <flux:table.cell class="text-right font-medium">
-                                                ${{ number_format($invoice['open_amount'], 2) }}
-                                            </flux:table.cell>
-                                        </flux:table.row>
-                                    @endforeach
-                                </flux:table.rows>
-                            </flux:table>
-                        </flux:checkbox.group>
+                    <div class="mb-4">
+                        <x-invoice-selection-table :invoices="$availableInvoices" wire-model="selectedInvoices" />
                     </div>
 
                     {{-- Selected Total --}}
@@ -138,7 +104,7 @@
 
     {{-- Step 3: Payment Method --}}
     @if($currentStep === 3)
-        <flux:card class="max-w-2xl">
+        <flux:card class="max-w-2xl mx-auto">
             <div class="p-6">
                 <flux:heading size="lg" class="mb-6">Payment Method</flux:heading>
 
@@ -263,55 +229,20 @@
                 @endif
 
                 @if($paymentMethodType === 'card')
-                    <div wire:key="payment-fields-card" class="space-y-4">
-                        <flux:field>
-                            <flux:label>Card Number</flux:label>
-                            <flux:input wire:model="cardNumber" placeholder="1234 5678 9012 3456" />
-                        </flux:field>
-
-                        <div class="grid grid-cols-2 gap-4">
-                            <flux:field>
-                                <flux:label>Expiry Date</flux:label>
-                                <flux:input wire:model="cardExpiry" placeholder="MM/YY" />
-                            </flux:field>
-                            <flux:field>
-                                <flux:label>CVV</flux:label>
-                                <flux:input wire:model="cardCvv" type="password" placeholder="123" />
-                            </flux:field>
-                        </div>
-
-                        <flux:field>
-                            <flux:label>Name on Card</flux:label>
-                            <flux:input wire:model="cardName" placeholder="John Doe" />
-                        </flux:field>
-                    </div>
+                    <x-payment-method-fields
+                        type="card"
+                        :show-card-name="true"
+                        :show-save-option="false"
+                    />
                 @endif
 
                 @if($paymentMethodType === 'ach')
-                    <div wire:key="payment-fields-ach" class="space-y-4">
-                        <flux:field>
-                            <flux:label>Account Holder Name</flux:label>
-                            <flux:input wire:model="accountName" placeholder="John Doe" />
-                        </flux:field>
-
-                        <flux:field>
-                            <flux:label>Routing Number</flux:label>
-                            <flux:input wire:model="routingNumber" placeholder="123456789" />
-                        </flux:field>
-
-                        <flux:field>
-                            <flux:label>Account Number</flux:label>
-                            <flux:input wire:model="accountNumber" placeholder="1234567890" />
-                        </flux:field>
-
-                        <flux:field>
-                            <flux:label>Account Type</flux:label>
-                            <flux:select wire:model="accountType">
-                                <option value="checking">Checking</option>
-                                <option value="savings">Savings</option>
-                            </flux:select>
-                        </flux:field>
-                    </div>
+                    <x-payment-method-fields
+                        type="ach"
+                        :show-account-name="true"
+                        account-type-model="accountType"
+                        :show-save-option="false"
+                    />
                 @endif
 
                 <div class="flex justify-between mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-700">
@@ -324,7 +255,7 @@
 
     {{-- Step 4: Configure Plan --}}
     @if($currentStep === 4)
-        <flux:card class="max-w-2xl">
+        <flux:card class="max-w-2xl mx-auto">
             <div class="p-6">
                 <flux:heading size="lg" class="mb-6">Configure Payment Plan</flux:heading>
 
@@ -525,7 +456,7 @@
 
     {{-- Step 5: Review --}}
     @if($currentStep === 5)
-        <flux:card class="max-w-2xl">
+        <flux:card class="max-w-2xl mx-auto">
             <div class="p-6">
                 <flux:heading size="lg" class="mb-6">Review Payment Plan</flux:heading>
 

@@ -6,6 +6,7 @@ namespace App\Livewire\Admin;
 
 use App\Repositories\PaymentRepository;
 use Illuminate\Support\Facades\Log;
+use Livewire\Attributes\Lazy;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
@@ -30,6 +31,7 @@ use Livewire\Component;
  * Listens:
  * - 'reset-client-search' to reset all state
  */
+#[Lazy]
 class ClientSearch extends Component
 {
     // Search state (URL-synced)
@@ -249,6 +251,52 @@ class ClientSearch extends Component
         $this->selectedClient = null;
         $this->loading = false;
         $this->errorMessage = null;
+    }
+
+    /**
+     * Skeleton placeholder shown while the component lazy-loads.
+     *
+     * Renders a shimmer skeleton matching the search form and results table layout.
+     */
+    public function placeholder(): string
+    {
+        return <<<'HTML'
+        <div>
+            <flux:skeleton.group animate="shimmer">
+                {{-- Search bar skeleton --}}
+                <div class="flex flex-col md:flex-row gap-4 mb-4">
+                    <div class="w-full md:w-48">
+                        <flux:skeleton class="h-10 w-full rounded-lg" />
+                    </div>
+                    <div class="flex-1">
+                        <flux:skeleton class="h-10 w-full rounded-lg" />
+                    </div>
+                    <flux:skeleton class="h-10 w-24 rounded-lg" />
+                </div>
+
+                {{-- Results table skeleton --}}
+                <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
+                    {{-- Table header --}}
+                    <div class="flex gap-4 px-4 py-3 bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
+                        <flux:skeleton.line class="w-24" />
+                        <flux:skeleton.line class="w-48" />
+                        <flux:skeleton.line class="w-24" />
+                        <flux:skeleton.line class="w-16" />
+                    </div>
+
+                    {{-- Table rows --}}
+                    @for ($i = 0; $i < 5; $i++)
+                        <div class="flex items-center gap-4 px-4 py-3 border-b border-zinc-200 dark:border-zinc-700 last:border-b-0">
+                            <flux:skeleton.line class="w-24" />
+                            <flux:skeleton.line class="w-48" />
+                            <flux:skeleton.line class="w-24" />
+                            <flux:skeleton class="h-8 w-16 rounded" />
+                        </div>
+                    @endfor
+                </div>
+            </flux:skeleton.group>
+        </div>
+        HTML;
     }
 
     public function render()

@@ -14,11 +14,14 @@ use App\Livewire\Admin\PaymentPlans\Create as PaymentPlansCreate;
 use App\Livewire\Admin\PaymentPlans\Index as PaymentPlansIndex;
 use App\Livewire\Admin\Payments\Create as PaymentsCreate;
 use App\Livewire\Admin\Payments\Index as PaymentsIndex;
+use App\Livewire\Admin\PaymentRequests\Index as PaymentRequestsIndex;
 use App\Livewire\Admin\RecurringPayments\Create as RecurringPaymentsCreate;
 use App\Livewire\Admin\RecurringPayments\Import as RecurringPaymentsImport;
 use App\Livewire\Admin\RecurringPayments\Index as RecurringPaymentsIndex;
 use App\Livewire\Admin\Users\Index as UsersIndex;
+use App\Livewire\Admin\FileUpload\Index as FileUploadIndex;
 use App\Livewire\PaymentFlow;
+use App\Livewire\PaymentRequestFlow;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
@@ -39,6 +42,9 @@ Route::livewire('/payment', PaymentFlow::class)->name('payment.flow');
 Route::get('/account', function () {
     return view('account-portal');
 })->name('account.portal');
+
+// Email Payment Request (public, tokenized)
+Route::livewire('/pay/{token}', PaymentRequestFlow::class)->name('payment.request');
 
 /*
 |--------------------------------------------------------------------------
@@ -83,6 +89,8 @@ Route::prefix('admin')->middleware(['admin'])->group(function () {
     Route::livewire('/ach/batches/{batch}', AchBatchesShow::class)->name('admin.ach.batches.show');
     Route::livewire('/ach/returns', AchReturnsIndex::class)->name('admin.ach.returns.index');
     Route::livewire('/notifications', NotificationsIndex::class)->name('admin.notifications');
+    Route::livewire('/payment-requests', PaymentRequestsIndex::class)->name('admin.payment-requests');
+    Route::livewire('/file-upload', FileUploadIndex::class)->name('admin.file-upload');
 
     // Debug client grouping (protected - admin only)
     Route::get('/debug-grouping/{last4}/{name}', function ($last4, $name) {

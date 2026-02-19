@@ -4,10 +4,13 @@
 
 namespace App\Models;
 
+use App\Mail\PaymentReceipt;
 use App\Models\Ach\AchEntry;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 /**
  * Payment Model
@@ -54,7 +57,50 @@ class Payment extends Model
 
     public const STATUS_RETURNED = 'returned';
 
+    public const STATUS_VOIDED = 'voided';
+
     public const STATUS_SKIPPED = 'skipped';
+
+    // Source constants (match metadata['source'] values set across all payment flows)
+    public const SOURCE_PUBLIC = 'tr-pay';
+
+    public const SOURCE_ADMIN = 'tr-pay-admin';
+
+    public const SOURCE_EMAIL = 'tr-pay-email';
+
+    public const SOURCE_ADMIN_SCHEDULED = 'admin-scheduled';
+
+    public const SOURCE_SCHEDULED = 'tr-pay-scheduled';
+
+    public const SOURCE_RECURRING = 'tr-pay-recurring';
+
+    /**
+     * Human-readable labels for each source value.
+     *
+     * @var array<string, string>
+     */
+    public const SOURCE_LABELS = [
+        self::SOURCE_PUBLIC => 'Public Portal',
+        self::SOURCE_ADMIN => 'Admin',
+        self::SOURCE_EMAIL => 'Email Request',
+        self::SOURCE_ADMIN_SCHEDULED => 'Scheduled',
+        self::SOURCE_SCHEDULED => 'Scheduled',
+        self::SOURCE_RECURRING => 'Recurring',
+    ];
+
+    /**
+     * Badge color for each source value.
+     *
+     * @var array<string, string>
+     */
+    public const SOURCE_BADGE_COLORS = [
+        self::SOURCE_PUBLIC => 'blue',
+        self::SOURCE_ADMIN => 'amber',
+        self::SOURCE_EMAIL => 'purple',
+        self::SOURCE_ADMIN_SCHEDULED => 'zinc',
+        self::SOURCE_SCHEDULED => 'zinc',
+        self::SOURCE_RECURRING => 'teal',
+    ];
 
     /**
      * The attributes that are mass assignable.
@@ -181,6 +227,22 @@ class Payment extends Model
     public function scopeReturned($query)
     {
         return $query->where('status', self::STATUS_RETURNED);
+    }
+
+    /**
+     * Scope: Refunded payments.
+     */
+    public function scopeRefunded($query)
+    {
+        return $query->where('status', self::STATUS_REFUNDED);
+    }
+
+    /**
+     * Scope: Voided payments.
+     */
+    public function scopeVoided($query)
+    {
+        return $query->where('status', self::STATUS_VOIDED);
     }
 
     /**
@@ -322,6 +384,176 @@ class Payment extends Model
         $this->metadata = $metadata;
 
         $this->save();
+    }
+
+    /**
+     * Check if this payment was refunded.
+     */
+    public function isRefunded(): bool
+    {
+        return $this->status === self::STATUS_REFUNDED;
+    }
+
+    /**
+     * Check if this payment was voided.
+     */
+    public function isVoided(): bool
+    {
+        return $this->status === self::STATUS_VOIDED;
+    }
+
+    /**
+     * Mark a completed card payment as refunded.
+     *
+     * @param  string  $reason  Human-readable refund reason
+     * @param  string|null  $refundTransactionId  Gateway refund transaction ID
+     */
+    public function markAsRefunded(string $reason, ?string $refundTransactionId = null): void
+    {
+        $this->status = self::STATUS_REFUNDED;
+        $this->failure_reason = $reason;
+
+        $metadata = $this->metadata ?? [];
+        $metadata['refunded_at'] = now()->toIso8601String();
+        $metadata['refund_reason'] = $reason;
+        if ($refundTransactionId) {
+            $metadata['refund_transaction_id'] = $refundTransactionId;
+        }
+        $metadata['original_status'] = $this->getOriginal('status');
+        $this->metadata = $metadata;
+
+        $this->save();
+    }
+
+    /**
+     * Mark a processing ACH payment as voided.
+     *
+     * @param  string  $reason  Human-readable void reason
+     */
+    public function markAsVoided(string $reason): void
+    {
+        $this->status = self::STATUS_VOIDED;
+        $this->failure_reason = $reason;
+
+        $metadata = $this->metadata ?? [];
+        $metadata['voided_at'] = now()->toIso8601String();
+        $metadata['void_reason'] = $reason;
+        $metadata['original_status'] = $this->getOriginal('status');
+        $this->metadata = $metadata;
+
+        $this->save();
+    }
+
+    /**
+     * Get the resolved source key, disambiguating plan installments from public portal.
+     *
+     * Payments with source 'tr-pay' that belong to a payment plan are reclassified
+     * as 'plan-installment' for display purposes.
+     */
+    public function getResolvedSource(): string
+    {
+        $source = $this->metadata['source'] ?? null;
+
+        // Disambiguate: 'tr-pay' is used for both public portal and plan installments
+        if ($source === self::SOURCE_PUBLIC && $this->payment_plan_id !== null) {
+            return 'plan-installment';
+        }
+
+        return $source ?? 'unknown';
+    }
+
+    /**
+     * Get the human-readable source label for display.
+     */
+    public function getSourceLabelAttribute(): string
+    {
+        $resolved = $this->getResolvedSource();
+
+        if ($resolved === 'plan-installment') {
+            return 'Plan Installment';
+        }
+
+        return self::SOURCE_LABELS[$resolved] ?? 'Unknown';
+    }
+
+    /**
+     * Get the badge color for this payment's source.
+     */
+    public function getSourceBadgeColorAttribute(): string
+    {
+        $resolved = $this->getResolvedSource();
+
+        if ($resolved === 'plan-installment') {
+            return 'indigo';
+        }
+
+        return self::SOURCE_BADGE_COLORS[$resolved] ?? 'zinc';
+    }
+
+    /**
+     * Send a payment receipt email to the customer's email on file.
+     *
+     * Uses the Customer.email field (synced from PracticeCS). Skips silently
+     * if no email is on file. Catches exceptions so email failures never
+     * break the calling payment flow.
+     *
+     * @return bool Whether the email was sent successfully
+     */
+    public function sendReceipt(): bool
+    {
+        $customer = $this->customer ?? $this->customer()->first();
+        $email = $customer?->email;
+
+        if (! $email) {
+            Log::info('Payment receipt not sent — no customer email on file', [
+                'payment_id' => $this->id,
+                'transaction_id' => $this->transaction_id,
+            ]);
+
+            return false;
+        }
+
+        try {
+            $metadata = $this->metadata ?? [];
+
+            $paymentData = [
+                'amount' => (float) $this->amount,
+                'fee' => (float) $this->fee,
+                'paymentMethod' => $this->payment_method ?? 'unknown',
+                'invoices' => collect($metadata['invoice_keys'] ?? [])->map(fn ($inv) => [
+                    'invoice_number' => $inv,
+                    'description' => null,
+                    'amount' => null,
+                ])->values()->toArray(),
+            ];
+
+            $clientInfo = [
+                'client_name' => $metadata['client_name'] ?? $customer->name ?? 'Client',
+                'client_id' => $metadata['client_id'] ?? $this->client_id ?? '',
+            ];
+
+            Mail::to($email)->send(new PaymentReceipt(
+                $paymentData,
+                $clientInfo,
+                $this->transaction_id
+            ));
+
+            Log::info('Payment receipt email sent', [
+                'payment_id' => $this->id,
+                'transaction_id' => $this->transaction_id,
+                'email' => $email,
+            ]);
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to send payment receipt email', [
+                'payment_id' => $this->id,
+                'transaction_id' => $this->transaction_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
     }
 
     /**

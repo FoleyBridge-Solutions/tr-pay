@@ -7,11 +7,12 @@ use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
+use RyanChandler\LaravelCloudflareTurnstile\Rules\Turnstile;
 
 /**
  * Admin Login Component
  *
- * Handles admin user authentication.
+ * Handles admin user authentication with Cloudflare Turnstile bot protection.
  */
 #[Layout('layouts::admin-guest')]
 class Login extends Component
@@ -24,14 +25,23 @@ class Login extends Component
 
     public bool $remember = false;
 
+    public string $turnstileToken = '';
+
     /**
      * Attempt to authenticate the user.
      */
     public function login(): void
     {
-        $this->validate();
+        $this->validate([
+            'email' => 'required|email',
+            'password' => 'required|min:8',
+            'turnstileToken' => ['required', new Turnstile],
+        ], [
+            'turnstileToken.required' => 'Please complete the security check.',
+        ]);
 
         if (! Auth::attempt(['email' => $this->email, 'password' => $this->password], $this->remember)) {
+            $this->reset('turnstileToken');
             $this->addError('email', 'The provided credentials do not match our records.');
 
             return;
@@ -41,6 +51,7 @@ class Login extends Component
 
         if (! $user->is_active) {
             Auth::logout();
+            $this->reset('turnstileToken');
             $this->addError('email', 'Your account has been deactivated.');
 
             return;

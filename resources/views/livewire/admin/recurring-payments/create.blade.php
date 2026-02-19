@@ -167,57 +167,20 @@
                         </div>
 
                         @if($paymentMethodType === 'card')
-                            <div wire:key="payment-fields-card" class="space-y-4">
-                                <flux:field>
-                                    <flux:label>Card Number</flux:label>
-                                    <flux:input wire:model="cardNumber" placeholder="1234 5678 9012 3456" />
-                                    <flux:error name="cardNumber" />
-                                </flux:field>
-
-                                <div class="grid grid-cols-2 gap-4">
-                                    <flux:field>
-                                        <flux:label>Expiry Date</flux:label>
-                                        <flux:input wire:model="cardExpiry" placeholder="MM/YY" />
-                                        <flux:error name="cardExpiry" />
-                                    </flux:field>
-                                    <flux:field>
-                                        <flux:label>CVV (Optional)</flux:label>
-                                        <flux:input wire:model="cardCvv" type="password" placeholder="123" />
-                                    </flux:field>
-                                </div>
-
-                                <flux:field>
-                                    <flux:label>Name on Card (Optional)</flux:label>
-                                    <flux:input wire:model="cardName" placeholder="John Doe" />
-                                </flux:field>
-                            </div>
+                            <x-payment-method-fields
+                                type="card"
+                                :show-card-name="true"
+                                :optional-labels="true"
+                                :show-save-option="false"
+                            />
                         @elseif($paymentMethodType === 'ach')
-                            <div wire:key="payment-fields-ach" class="space-y-4">
-                                <flux:field>
-                                    <flux:label>Account Holder Name (Optional)</flux:label>
-                                    <flux:input wire:model="accountName" placeholder="John Doe" />
-                                </flux:field>
-
-                                <flux:field>
-                                    <flux:label>Routing Number</flux:label>
-                                    <flux:input wire:model="routingNumber" placeholder="123456789" />
-                                    <flux:error name="routingNumber" />
-                                </flux:field>
-
-                                <flux:field>
-                                    <flux:label>Account Number</flux:label>
-                                    <flux:input wire:model="accountNumber" placeholder="1234567890" />
-                                    <flux:error name="accountNumber" />
-                                </flux:field>
-
-                                <flux:field>
-                                    <flux:label>Account Type</flux:label>
-                                    <flux:select wire:model="accountType">
-                                        <option value="checking">Checking</option>
-                                        <option value="savings">Savings</option>
-                                    </flux:select>
-                                </flux:field>
-                            </div>
+                            <x-payment-method-fields
+                                type="ach"
+                                :show-account-name="true"
+                                :optional-account-name="true"
+                                account-type-model="accountType"
+                                :show-save-option="false"
+                            />
                         @elseif($paymentMethodType === 'saved')
                             <div wire:key="payment-fields-saved" class="space-y-3">
                                 @if($savedPaymentMethods->count() === 0)

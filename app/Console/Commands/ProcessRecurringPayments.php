@@ -135,6 +135,12 @@ class ProcessRecurringPayments extends Command
                     if (config('practicecs.payment_integration.enabled')) {
                         $this->writeToPracticeCs($recurringPayment, $payment);
                     }
+
+                    // Send receipt email for card payments (ACH receipts are sent on settlement)
+                    $isAch = $recurringPayment->payment_method_type === 'ach';
+                    if (! $isAch) {
+                        $payment->sendReceipt();
+                    }
                 } else {
                     $errorMessage = $result['error'] ?? 'Unknown error';
                     $recurringPayment->recordFailedPayment($errorMessage);

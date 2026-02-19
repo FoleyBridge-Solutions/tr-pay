@@ -21,14 +21,16 @@ use Illuminate\Support\Facades\Log;
 /**
  * Check the settlement status of ACH payments via Kotapay reports.
  *
- * Uses report-based reconciliation instead of per-transaction polling:
- *   Job 1 — Settle PROCESSING payments on their effective date (or mark failed if returned)
+ * Uses report-based reconciliation:
+ *   Job 1 — Settle PROCESSING payments by confirming they appear in Kotapay's
+ *           Processed Batches Report (positive confirmation, not inference).
+ *           Also checks the Returns Report for returned payments.
  *   Job 2 — Monitor COMPLETED payments for post-settlement returns (up to 60 days)
  *   Job 3 — Check corrections (NOC) and log them
  *
  * Matching logic:
- *   Primary:  payment.metadata.kotapay_account_name_id === report row EntryID
- *   Fallback: effective_date + total_amount + routing/account (for legacy payments)
+ *   Primary:  payment.metadata.kotapay_account_name_id === batch entry EntryID
+ *   Fallback: customer name + amount + routing/account (for legacy payments without EntryID)
  *
  * Should be run daily via the scheduler (morning + evening).
  */
@@ -134,12 +136,17 @@ class CheckAchPaymentStatus extends Command
     // =====================================================================
 
     /**
-     * Settle processing payments by checking them against the returns report.
+     * Settle processing payments using Kotapay's Processed Batches Report
+     * for positive settlement confirmation, and Returns Report for failures.
      *
      * Logic:
-     *   - If payment's EntryID is found in returns → STATUS_FAILED
-     *   - If NOT in returns AND effective_date <= today → STATUS_COMPLETED
-     *   - If NOT in returns AND effective_date > today → still PROCESSING
+     *   1. Fetch all processed batches covering the payment date range
+     *   2. Fetch detail for each batch to get individual entries
+     *   3. Build a lookup of all confirmed-settled entries
+     *   4. For each processing payment:
+     *      - If found in returns → STATUS_FAILED
+     *      - If found in a processed batch → STATUS_COMPLETED (confirmed)
+     *      - If not found in either → still PROCESSING (do NOT guess)
      *
      * @param  ReportService  $reportService  Kotapay report service
      * @param  bool  $dryRun  Whether to skip actual updates
@@ -170,54 +177,182 @@ class CheckAchPaymentStatus extends Command
         $this->info("Found {$payments->count()} processing ACH payment(s).");
         $this->newLine();
 
-        // Determine the date range for the returns report.
-        // We need returns from the earliest effective date among our processing payments.
-        $earliestDate = $this->getEarliestEffectiveDate($payments);
+        // ── Step 1: Fetch returns report ──────────────────────────────
+        $earliestDate = $this->getEarliestPaymentDate($payments);
         $startDate = $earliestDate->format('Y-m-d');
+        $endDate = Carbon::today()->format('Y-m-d');
 
         $this->line("Fetching returns report from {$startDate}...");
 
-        $returnsReport = $reportService->getReturnsReport($startDate);
-        $returnRows = $returnsReport['rows'] ?? [];
-        $this->line("Returns report: {$returnsReport['rowCount']} row(s).");
+        $returnRows = [];
+        $returnsByEntryId = [];
+
+        try {
+            $returnsReport = $reportService->getReturnsReport($startDate);
+            $returnRows = $returnsReport['rows'] ?? [];
+
+            // Guard: ensure rows is an array (Kotapay may return string in ACH format)
+            if (! is_array($returnRows)) {
+                $this->warn('  Returns report returned non-array rows — skipping returns check.');
+                Log::warning('Returns report returned non-array rows', [
+                    'type' => gettype($returnRows),
+                ]);
+                $returnRows = [];
+            }
+
+            $this->line('Returns report: '.count($returnRows).' row(s).');
+            $returnsByEntryId = $this->indexReturnsByEntryId($returnRows);
+        } catch (\Exception $e) {
+            $this->warn("  Could not fetch returns report: {$e->getMessage()}");
+            Log::warning('Failed to fetch returns report during settlement check', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         $this->newLine();
 
-        // Index returns by EntryID for fast primary lookup
-        $returnsByEntryId = $this->indexReturnsByEntryId($returnRows);
+        // ── Step 2: Fetch processed batches ──────────────────────────
+        $this->line("Fetching processed batches from {$startDate} to {$endDate}...");
 
+        $settledEntries = $this->buildSettledEntriesLookup($reportService, $startDate, $endDate);
+
+        $this->line('Settled entries indexed: '.count($settledEntries['by_entry_id']).' by EntryID, '.count($settledEntries['by_name_amount']).' by name+amount.');
+        $this->newLine();
+
+        // ── Step 3: Process each payment ─────────────────────────────
         foreach ($payments as $payment) {
-            $this->processPaymentSettlement($payment, $returnRows, $returnsByEntryId, $dryRun);
+            $this->processPaymentSettlement($payment, $returnRows, $returnsByEntryId, $settledEntries, $dryRun);
         }
 
         $this->newLine();
     }
 
     /**
-     * Process a single payment for settlement against the returns report.
+     * Build a lookup of all entries from Kotapay's Processed Batches Report.
+     *
+     * Fetches batch summaries, then detail for each BILLING batch (skips
+     * DISBURSE/Funding batches which are internal transfers).
+     *
+     * Returns a structure with two indexes for matching:
+     *   - by_entry_id: EntryID → entry row (for payments with kotapay_account_name_id)
+     *   - by_name_amount: "NORMALIZED_NAME|AMOUNT" → entry row (for legacy payments)
+     *
+     * @param  ReportService  $reportService  Kotapay report service
+     * @param  string  $startDate  Start date (Y-m-d)
+     * @param  string  $endDate  End date (Y-m-d)
+     * @return array{by_entry_id: array, by_name_amount: array}
+     */
+    protected function buildSettledEntriesLookup(ReportService $reportService, string $startDate, string $endDate): array
+    {
+        $byEntryId = [];
+        $byNameAmount = [];
+
+        try {
+            $batchSummary = $reportService->getProcessedBatchesSummary($startDate, $endDate);
+            $batches = $batchSummary['rows'] ?? [];
+
+            $this->line('Found '.count($batches).' batch(es) in date range.');
+
+            foreach ($batches as $batch) {
+                $batchId = $batch['BatchUniqueID'] ?? null;
+                $desc = trim($batch['AppDescription'] ?? '');
+                $disc = trim($batch['AppDiscretionary'] ?? '');
+
+                // Skip non-collection batches (disbursements, funding, etc.)
+                // We only care about BILLING / PAYMENT / DOWN PAYME batches — these
+                // are the ones that pull money from customer accounts.
+                $isCollection = in_array($desc, ['BILLING', 'PAYMENT', 'ADMIN PAYM', 'DOWN PAYME'], true)
+                    || str_contains($disc, 'BILLING');
+
+                if (! $isCollection) {
+                    if ($this->output->isVerbose()) {
+                        $this->line("  Skipping batch {$batchId} ({$desc} / {$disc})");
+                    }
+
+                    continue;
+                }
+
+                if ($batchId === null) {
+                    continue;
+                }
+
+                // Fetch detail for this batch
+                try {
+                    $detail = $reportService->getProcessedBatchDetail($batchId);
+                    $entries = $detail['rows'] ?? [];
+                    $effectiveDate = $batch['EffectiveDate'] ?? null;
+
+                    foreach ($entries as $entry) {
+                        $entryName = trim($entry['EntryName'] ?? '');
+                        $entryId = trim($entry['EntryID'] ?? '');
+                        $creditAmt = (float) ($entry['CreditAmt'] ?? 0);
+
+                        // Skip the Burkhart Peterson offset entry (the debit side)
+                        if ($entryName === 'BURKHART PETERSO' || $creditAmt <= 0) {
+                            continue;
+                        }
+
+                        // Enrich entry with batch-level effective date
+                        $entry['_batch_effective_date'] = $effectiveDate;
+                        $entry['_batch_id'] = $batchId;
+
+                        // Index by EntryID (primary match for new payments)
+                        if ($entryId !== '') {
+                            $byEntryId[$entryId] = $entry;
+                        }
+
+                        // Index by normalized name + amount (fallback for legacy payments)
+                        $normalizedName = $this->normalizeName($entryName);
+                        $key = $normalizedName.'|'.number_format($creditAmt, 2, '.', '');
+                        // Store as array — there could be multiple entries with same name+amount
+                        $byNameAmount[$key][] = $entry;
+                    }
+                } catch (\Exception $e) {
+                    $this->warn("  Failed to fetch detail for batch {$batchId}: {$e->getMessage()}");
+                    $this->errors++;
+                }
+            }
+        } catch (\Exception $e) {
+            $this->error("Failed to fetch processed batches: {$e->getMessage()}");
+            Log::error('Failed to fetch processed batches for settlement check', [
+                'error' => $e->getMessage(),
+            ]);
+            $this->errors++;
+        }
+
+        return [
+            'by_entry_id' => $byEntryId,
+            'by_name_amount' => $byNameAmount,
+        ];
+    }
+
+    /**
+     * Process a single payment for settlement.
+     *
+     * Checks against both returns report and processed batches.
      *
      * @param  Payment  $payment  The processing payment
      * @param  array  $returnRows  All return report rows
      * @param  array  $returnsByEntryId  Returns indexed by EntryID
+     * @param  array  $settledEntries  Settled entries lookup from processed batches
      * @param  bool  $dryRun  Whether to skip actual updates
      */
-    protected function processPaymentSettlement(Payment $payment, array $returnRows, array $returnsByEntryId, bool $dryRun): void
+    protected function processPaymentSettlement(Payment $payment, array $returnRows, array $returnsByEntryId, array $settledEntries, bool $dryRun): void
     {
         $accountNameId = $payment->metadata['kotapay_account_name_id'] ?? null;
         $effectiveDate = $payment->metadata['kotapay_effective_date'] ?? null;
 
-        $this->line("Payment #{$payment->id} — \${$payment->total_amount} — AccountNameId: ".($accountNameId ?? 'NONE'));
+        $this->line("Payment #{$payment->id} — \${$payment->total_amount} — ".($payment->customer?->name ?? 'Unknown').' — AccountNameId: '.($accountNameId ?? 'NONE'));
 
         if ($this->output->isVerbose()) {
             $this->line("  vendor_transaction_id: {$payment->vendor_transaction_id}");
             $this->line('  effective_date: '.($effectiveDate ?? 'unknown'));
-            $this->line('  is_fallback_txn: '.($this->isFallbackTransactionId($payment->vendor_transaction_id) ? 'yes' : 'no'));
         }
 
-        // Try to find this payment in the returns report
+        // ── Check 1: Is this payment in the returns report? ──────────
         $matchedReturn = $this->findPaymentInReturns($payment, $returnRows, $returnsByEntryId);
 
         if ($matchedReturn !== null) {
-            // Payment was returned — mark as failed
             $returnCode = $matchedReturn['Code'] ?? 'Unknown';
             $returnReason = $matchedReturn['Reason'] ?? 'No reason provided';
 
@@ -234,7 +369,6 @@ class CheckAchPaymentStatus extends Command
                 'failed_at' => now(),
             ]);
 
-            // Store return details in metadata
             $metadata = $payment->metadata ?? [];
             $metadata['ach_return_code'] = $returnCode;
             $metadata['ach_return_reason'] = $returnReason;
@@ -250,7 +384,7 @@ class CheckAchPaymentStatus extends Command
                 'status' => 'returned',
             ];
 
-            Log::warning('ACH payment returned (pre-settlement)', [
+            Log::warning('ACH payment returned', [
                 'payment_id' => $payment->id,
                 'return_code' => $returnCode,
                 'return_reason' => $returnReason,
@@ -271,33 +405,39 @@ class CheckAchPaymentStatus extends Command
                 Log::warning('Failed to send admin notification', ['error' => $notifyEx->getMessage()]);
             }
 
-            // Revert plan tracking if applicable
             $this->revertPlanTrackingOnReturn($payment);
 
             return;
         }
 
-        // Not in returns — check if effective date has passed
-        $today = Carbon::today();
+        // ── Check 2: Is this payment in a processed batch? ───────────
+        $matchedBatch = $this->findPaymentInBatches($payment, $settledEntries);
 
-        if ($effectiveDate === null) {
-            // Legacy payment with no effective date stored.
-            // Use created_at + 5 business days as a surrogate effective date.
-            // ACH typically settles in 2-3 business days; 5 is conservative.
-            $surrogateDate = Carbon::parse($payment->created_at)->addWeekdays(5);
+        if ($matchedBatch !== null) {
+            $batchEffective = $matchedBatch['_batch_effective_date'] ?? null;
+            $batchId = $matchedBatch['_batch_id'] ?? null;
+            $entryName = trim($matchedBatch['EntryName'] ?? '');
+            $processedAt = $batchEffective ? Carbon::parse($batchEffective) : now();
 
-            if ($surrogateDate->gt($today)) {
-                // Still within the settlement window — give it time
-                $daysUntil = $today->diffInDays($surrogateDate);
-                $this->line("  [PROCESSING] No effective date — surrogate settlement in {$daysUntil} day(s)");
+            // Don't mark completed until the effective date has passed — the batch
+            // is scheduled but money hasn't actually moved yet.
+            if ($batchEffective && Carbon::parse($batchEffective)->isFuture()) {
+                $this->line("  [BATCHED] Found in batch {$batchId} but effective date {$batchEffective} is in the future — waiting");
                 $this->stillProcessing++;
 
+                // Store the batch info so we don't have to re-discover it later
+                $metadata = $payment->metadata ?? [];
+                if (! isset($metadata['settlement_batch_id'])) {
+                    $metadata['settlement_batch_id'] = $batchId;
+                    $metadata['settlement_effective_date'] = $batchEffective;
+                    $payment->update(['metadata' => $metadata]);
+                }
+
                 return;
             }
 
-            // Surrogate date has passed and NOT in returns → settled by inference
             if ($dryRun) {
-                $this->info("  [DRY RUN] Would mark COMPLETED — legacy payment, created {$payment->created_at->format('Y-m-d')}, not in returns");
+                $this->info("  [DRY RUN] Would mark COMPLETED — confirmed in batch {$batchId}, effective {$batchEffective}");
                 $this->settled++;
 
                 return;
@@ -305,72 +445,219 @@ class CheckAchPaymentStatus extends Command
 
             $payment->update([
                 'status' => Payment::STATUS_COMPLETED,
-                'processed_at' => $surrogateDate,
+                'processed_at' => $processedAt,
             ]);
 
-            // Flag in metadata that this was settled by inference, not by confirmed effective date
             $metadata = $payment->metadata ?? [];
-            $metadata['settled_by_inference'] = true;
-            $metadata['surrogate_effective_date'] = $surrogateDate->format('Y-m-d');
+            $metadata['settled_via'] = 'processed_batch';
+            $metadata['settlement_batch_id'] = $batchId;
+            $metadata['settlement_effective_date'] = $batchEffective;
+            $metadata['settlement_confirmed_at'] = now()->toIso8601String();
             $payment->update(['metadata' => $metadata]);
 
-            $this->info("  [SETTLED] Legacy payment — settled by inference (created: {$payment->created_at->format('Y-m-d')}, not in returns)");
+            $this->info("  [SETTLED] Confirmed in batch {$batchId} (effective: {$batchEffective}, entry: {$entryName})");
             $this->settled++;
 
-            Log::info('ACH payment settled by inference (no effective date, not in returns)', [
+            Log::info('ACH payment settled — confirmed via processed batch', [
                 'payment_id' => $payment->id,
-                'created_at' => $payment->created_at->toIso8601String(),
-                'surrogate_effective_date' => $surrogateDate->format('Y-m-d'),
-                'vendor_transaction_id' => $payment->vendor_transaction_id,
-            ]);
-
-            // Write deferred PracticeCS data
-            $this->writeDeferredPracticeCs($payment);
-
-            return;
-        }
-
-        $effectiveDateCarbon = Carbon::parse($effectiveDate);
-
-        if ($effectiveDateCarbon->lte($today)) {
-            // Effective date has passed and NOT in returns → settled
-            if ($dryRun) {
-                $this->info("  [DRY RUN] Would mark COMPLETED — effective date {$effectiveDate} <= today");
-                $this->settled++;
-
-                return;
-            }
-
-            $payment->update([
-                'status' => Payment::STATUS_COMPLETED,
-                'processed_at' => $effectiveDateCarbon,
-            ]);
-
-            $this->info("  [SETTLED] Marked completed (effective: {$effectiveDate})");
-            $this->settled++;
-
-            Log::info('ACH payment settled via report reconciliation', [
-                'payment_id' => $payment->id,
-                'effective_date' => $effectiveDate,
+                'batch_id' => $batchId,
+                'effective_date' => $batchEffective,
                 'account_name_id' => $accountNameId,
             ]);
 
-            // Write deferred PracticeCS data
             $this->writeDeferredPracticeCs($payment);
+
+            // Send receipt email now that ACH payment is confirmed settled
+            $payment->sendReceipt();
 
             return;
         }
 
-        // Effective date is in the future — still processing
-        $daysUntil = $today->diffInDays($effectiveDateCarbon);
-        $this->line("  [PROCESSING] Effective date {$effectiveDate} is {$daysUntil} day(s) away");
+        // ── Not found in either report — still processing ────────────
+        $age = Carbon::parse($payment->created_at)->diffInDays(now());
+        $this->line("  [PROCESSING] Not yet in any batch or returns report (age: {$age} day(s))");
         $this->stillProcessing++;
 
-        Log::info('ACH payment still processing — effective date in future', [
-            'payment_id' => $payment->id,
-            'effective_date' => $effectiveDate,
-            'days_until' => $daysUntil,
-        ]);
+        // Warn if payment is unusually old and still not in any batch
+        if ($age > 7) {
+            $this->warn("  [WARNING] Payment is {$age} days old and not confirmed in any batch — may need manual review");
+
+            Log::warning('ACH payment not found in any batch after extended period', [
+                'payment_id' => $payment->id,
+                'age_days' => $age,
+                'vendor_transaction_id' => $payment->vendor_transaction_id,
+                'account_name_id' => $accountNameId,
+            ]);
+        }
+    }
+
+    /**
+     * Find a payment in the processed batches lookup.
+     *
+     * Primary match: payment's kotapay_account_name_id === entry's EntryID.
+     * Fallback match: normalized customer name + amount.
+     *
+     * @param  Payment  $payment  The payment to find
+     * @param  array  $settledEntries  The settled entries lookup
+     * @return array|null The matched batch entry, or null
+     */
+    protected function findPaymentInBatches(Payment $payment, array $settledEntries): ?array
+    {
+        $accountNameId = $payment->metadata['kotapay_account_name_id'] ?? null;
+
+        // Primary match: by AccountNameId / EntryID
+        if ($accountNameId !== null && isset($settledEntries['by_entry_id'][$accountNameId])) {
+            if ($this->output->isVerbose()) {
+                $this->line("  Batch matched by EntryID: {$accountNameId}");
+            }
+
+            return $settledEntries['by_entry_id'][$accountNameId];
+        }
+
+        // Fallback match: by customer name + amount
+        $customerName = $payment->customer?->name ?? null;
+        $amount = (float) $payment->total_amount;
+
+        if ($customerName === null) {
+            return null;
+        }
+
+        $normalizedName = $this->normalizeName($customerName);
+        $key = $normalizedName.'|'.number_format($amount, 2, '.', '');
+
+        if (isset($settledEntries['by_name_amount'][$key])) {
+            $candidates = $settledEntries['by_name_amount'][$key];
+
+            // If only one candidate, use it
+            if (count($candidates) === 1) {
+                if ($this->output->isVerbose()) {
+                    $this->line("  Batch matched by name+amount: {$customerName} / \${$amount}");
+                }
+
+                Log::info('ACH payment matched via fallback (name+amount) in batch', [
+                    'payment_id' => $payment->id,
+                    'matched_name' => $customerName,
+                    'matched_amount' => $amount,
+                ]);
+
+                return $candidates[0];
+            }
+
+            // Multiple candidates — try to narrow by routing number
+            $routingNumber = $payment->metadata['routing_number'] ?? null;
+
+            if ($routingNumber !== null) {
+                foreach ($candidates as $candidate) {
+                    $entryRouting = trim($candidate['RoutingNbr'] ?? '');
+
+                    if ($entryRouting === $routingNumber) {
+                        if ($this->output->isVerbose()) {
+                            $this->line("  Batch matched by name+amount+routing: {$customerName} / \${$amount}");
+                        }
+
+                        return $candidate;
+                    }
+                }
+            }
+
+            // Still ambiguous — log warning and skip (don't guess)
+            Log::warning('ACH payment has multiple batch candidates — skipping auto-match', [
+                'payment_id' => $payment->id,
+                'customer_name' => $customerName,
+                'amount' => $amount,
+                'candidate_count' => count($candidates),
+            ]);
+        }
+
+        // Second fallback: prefix match on name + exact amount.
+        // Handles cases where Kotapay truncates a name mid-suffix (e.g., "PLLC" → "PLL")
+        // causing normalized names to diverge. We compare the first 12 chars of both names.
+        $match = $this->prefixMatchInBatches($payment, $customerName, $amount, $settledEntries);
+        if ($match !== null) {
+            return $match;
+        }
+
+        return null;
+    }
+
+    /**
+     * Attempt to match a payment by name prefix + amount across all batch entries.
+     *
+     * This is a secondary fallback for when exact normalized name matching fails,
+     * typically because Kotapay truncated a business name mid-suffix. Compares the
+     * first 12 characters of the customer name against batch entry names.
+     *
+     * Requires exactly one match to avoid ambiguity. Logs all matches for audit.
+     *
+     * @param  Payment  $payment  The payment to match
+     * @param  string  $customerName  The payment's customer name
+     * @param  float  $amount  The payment amount
+     * @param  array  $settledEntries  The settled entries lookup
+     * @return array|null The matched entry, or null
+     */
+    protected function prefixMatchInBatches(Payment $payment, string $customerName, float $amount, array $settledEntries): ?array
+    {
+        $paymentPrefix = $this->namePrefix($customerName);
+
+        if (strlen($paymentPrefix) < 6) {
+            // Name too short for reliable prefix matching
+            return null;
+        }
+
+        $amountStr = number_format($amount, 2, '.', '');
+        $candidates = [];
+
+        foreach ($settledEntries['by_name_amount'] as $key => $entries) {
+            // Key format is "NORMALIZED_NAME|AMOUNT"
+            $parts = explode('|', $key, 2);
+            if (count($parts) !== 2) {
+                continue;
+            }
+
+            $entryAmount = $parts[1];
+            if ($entryAmount !== $amountStr) {
+                continue;
+            }
+
+            // Check if the entry name prefix matches our customer name prefix
+            foreach ($entries as $entry) {
+                $entryName = trim($entry['EntryName'] ?? '');
+                $entryPrefix = $this->namePrefix($entryName);
+
+                if ($paymentPrefix === $entryPrefix) {
+                    $candidates[] = $entry;
+                }
+            }
+        }
+
+        if (count($candidates) === 1) {
+            $entryName = trim($candidates[0]['EntryName'] ?? '');
+
+            if ($this->output->isVerbose()) {
+                $this->line("  Batch matched by name-prefix+amount: \"{$customerName}\" ~ \"{$entryName}\" / \${$amount}");
+            }
+
+            Log::info('ACH payment matched via prefix fallback in batch', [
+                'payment_id' => $payment->id,
+                'customer_name' => $customerName,
+                'matched_entry_name' => $entryName,
+                'matched_amount' => $amount,
+                'prefix_used' => $paymentPrefix,
+            ]);
+
+            return $candidates[0];
+        }
+
+        if (count($candidates) > 1) {
+            Log::warning('ACH payment prefix match found multiple candidates — skipping', [
+                'payment_id' => $payment->id,
+                'customer_name' => $customerName,
+                'amount' => $amount,
+                'candidate_count' => count($candidates),
+            ]);
+        }
+
+        return null;
     }
 
     // =====================================================================
@@ -411,7 +698,16 @@ class CheckAchPaymentStatus extends Command
 
         $returnsReport = $reportService->getReturnsReport($startDate);
         $returnRows = $returnsReport['rows'] ?? [];
-        $this->line("Returns report: {$returnsReport['rowCount']} row(s).");
+
+        // Guard: ensure rows is an array
+        if (! is_array($returnRows)) {
+            $this->warn('  Returns report returned non-array rows — skipping post-settlement check.');
+            $this->newLine();
+
+            return;
+        }
+
+        $this->line('Returns report: '.count($returnRows).' row(s).');
         $this->newLine();
 
         $returnsByEntryId = $this->indexReturnsByEntryId($returnRows);
@@ -499,6 +795,14 @@ class CheckAchPaymentStatus extends Command
             $corrReport = $reportService->getCorrectionsReport($startDate);
             $corrRows = $corrReport['rows'] ?? [];
 
+            // Guard: ensure rows is an array
+            if (! is_array($corrRows)) {
+                $this->warn('Corrections report returned non-array rows — skipping.');
+                $this->newLine();
+
+                return;
+            }
+
             if (empty($corrRows)) {
                 $this->info('No corrections/NOC entries found.');
                 $this->newLine();
@@ -543,7 +847,7 @@ class CheckAchPaymentStatus extends Command
      * Find a payment in the returns report.
      *
      * Primary match: payment's kotapay_account_name_id === row's EntryID.
-     * Fallback match: effective_date + total_amount + routing/account number.
+     * Fallback match: amount + routing/account number, or amount + name prefix.
      *
      * @param  Payment  $payment  The payment to find
      * @param  array  $returnRows  All return report rows
@@ -557,16 +861,15 @@ class CheckAchPaymentStatus extends Command
         // Primary match: by AccountNameId / EntryID
         if ($accountNameId !== null && isset($returnsByEntryId[$accountNameId])) {
             if ($this->output->isVerbose()) {
-                $this->line("  Matched by EntryID: {$accountNameId}");
+                $this->line("  Matched return by EntryID: {$accountNameId}");
             }
 
             return $returnsByEntryId[$accountNameId];
         }
 
         // Fallback match: for legacy payments without AccountNameId
-        // Match on effective date + amount (+ routing/account if available)
         if ($accountNameId === null) {
-            return $this->fallbackMatch($payment, $returnRows);
+            return $this->fallbackReturnMatch($payment, $returnRows);
         }
 
         return null;
@@ -575,84 +878,118 @@ class CheckAchPaymentStatus extends Command
     /**
      * Attempt to match a legacy payment (no AccountNameId) against return rows.
      *
-     * Matches on ALL of: effective date, debit amount, and optionally routing/account.
-     * Requires an effective date to avoid false positives from amount-only matching.
-     * Legacy payments without an effective date are handled by age-based auto-settlement
-     * in processPaymentSettlement() instead.
+     * Matching strategies (in order of preference):
+     *   1. Amount + routing/account number (most reliable)
+     *   2. Amount + name prefix match (when no routing/account available)
+     *
+     * Requires a unique match to avoid false positives.
      *
      * @param  Payment  $payment  The legacy payment
      * @param  array  $returnRows  All return report rows
      * @return array|null The matched return row, or null
      */
-    protected function fallbackMatch(Payment $payment, array $returnRows): ?array
+    protected function fallbackReturnMatch(Payment $payment, array $returnRows): ?array
     {
-        $effectiveDate = $payment->metadata['kotapay_effective_date'] ?? null;
         $amount = (float) $payment->total_amount;
         $routingNumber = $payment->metadata['routing_number'] ?? null;
         $accountNumber = $payment->metadata['account_number'] ?? null;
-
-        // Without an effective date, fallback matching degrades to amount-only,
-        // which risks false positives. Skip fallback and let age-based settlement handle it.
-        if ($effectiveDate === null) {
-            if ($this->output->isVerbose()) {
-                $this->line('  Skipping fallback match — no effective date for reliable matching');
-            }
-
-            return null;
-        }
 
         if (empty($returnRows)) {
             return null;
         }
 
-        foreach ($returnRows as $row) {
-            $rowDate = isset($row['EffectiveDate']) ? trim($row['EffectiveDate']) : null;
-            $rowRouting = isset($row['RoutingNbr']) ? trim($row['RoutingNbr']) : null;
-            $rowAccount = isset($row['AccountNbr']) ? trim($row['AccountNbr']) : null;
+        // Strategy 1: Match by amount + routing/account
+        if ($routingNumber !== null || $accountNumber !== null) {
+            foreach ($returnRows as $row) {
+                $rowRouting = isset($row['RoutingNbr']) ? trim($row['RoutingNbr']) : null;
+                $rowAccount = isset($row['AccountNbr']) ? trim($row['AccountNbr']) : null;
 
-            // Use whichever amount is non-zero (debits use DebitAmt, but some
-            // returns reverse the direction and populate CreditAmt instead)
-            $rowDebit = (float) ($row['DebitAmt'] ?? 0);
+                $rowDebit = abs((float) ($row['DebitAmt'] ?? 0));
+                $rowCredit = (float) ($row['CreditAmt'] ?? 0);
+                $rowAmount = $rowDebit > 0 ? $rowDebit : $rowCredit;
+
+                if (abs($amount - $rowAmount) > 0.01) {
+                    continue;
+                }
+
+                if ($routingNumber !== null && $rowRouting !== null && $routingNumber !== $rowRouting) {
+                    continue;
+                }
+
+                if ($accountNumber !== null && $rowAccount !== null && $accountNumber !== $rowAccount) {
+                    continue;
+                }
+
+                if ($this->output->isVerbose()) {
+                    $this->line('  Fallback matched return by amount+routing/account');
+                }
+
+                Log::info('ACH payment matched via fallback in returns report', [
+                    'payment_id' => $payment->id,
+                    'matched_amount' => $rowAmount,
+                    'matched_routing' => $rowRouting,
+                ]);
+
+                return $row;
+            }
+        }
+
+        // Strategy 2: Match by amount + customer name prefix
+        $customerName = $payment->customer?->name ?? null;
+        if ($customerName === null) {
+            return null;
+        }
+
+        $paymentPrefix = $this->namePrefix($customerName);
+        if (strlen($paymentPrefix) < 6) {
+            return null;
+        }
+
+        $candidates = [];
+        foreach ($returnRows as $row) {
+            $rowDebit = abs((float) ($row['DebitAmt'] ?? 0));
             $rowCredit = (float) ($row['CreditAmt'] ?? 0);
             $rowAmount = $rowDebit > 0 ? $rowDebit : $rowCredit;
 
-            // Date must match (if we have one)
-            if ($effectiveDate !== null && $rowDate !== null && $rowDate !== '') {
-                // Normalize both dates to Y-m-d for comparison
-                $normalizedPayment = Carbon::parse($effectiveDate)->format('Y-m-d');
-                $normalizedRow = Carbon::parse($rowDate)->format('Y-m-d');
-
-                if ($normalizedPayment !== $normalizedRow) {
-                    continue;
-                }
-            }
-
-            // Amount must match (within 1 cent tolerance for rounding)
             if (abs($amount - $rowAmount) > 0.01) {
                 continue;
             }
 
-            // If we have routing/account, they must match too (trim for comparison)
-            if ($routingNumber !== null && $rowRouting !== null && $routingNumber !== $rowRouting) {
+            $entryName = isset($row['EntryName']) ? trim($row['EntryName']) : '';
+            if ($entryName === '') {
                 continue;
             }
-            if ($accountNumber !== null && $rowAccount !== null && $accountNumber !== $rowAccount) {
-                continue;
+
+            $entryPrefix = $this->namePrefix($entryName);
+            if ($paymentPrefix === $entryPrefix) {
+                $candidates[] = $row;
             }
+        }
+
+        if (count($candidates) === 1) {
+            $entryName = trim($candidates[0]['EntryName'] ?? '');
 
             if ($this->output->isVerbose()) {
-                $this->line('  Fallback matched by date+amount'.
-                    ($routingNumber ? '+routing' : '').
-                    ($accountNumber ? '+account' : ''));
+                $this->line("  Fallback matched return by name-prefix+amount: \"{$customerName}\" ~ \"{$entryName}\"");
             }
 
-            Log::info('ACH payment matched via fallback (no AccountNameId)', [
+            Log::info('ACH payment matched via name-prefix fallback in returns report', [
                 'payment_id' => $payment->id,
-                'matched_effective_date' => $rowDate,
-                'matched_amount' => $rowAmount,
+                'customer_name' => $customerName,
+                'matched_entry_name' => $entryName,
+                'matched_amount' => $amount,
             ]);
 
-            return $row;
+            return $candidates[0];
+        }
+
+        if (count($candidates) > 1) {
+            Log::warning('ACH payment return prefix match found multiple candidates — skipping', [
+                'payment_id' => $payment->id,
+                'customer_name' => $customerName,
+                'amount' => $amount,
+                'candidate_count' => count($candidates),
+            ]);
         }
 
         return null;
@@ -680,31 +1017,68 @@ class CheckAchPaymentStatus extends Command
     }
 
     /**
-     * Get the earliest effective date among a set of payments.
+     * Get the earliest payment date (created_at) among a set of payments.
      *
-     * Falls back to 30 days ago if no payments have an effective date stored.
+     * Used to determine the start date for report queries.
+     * Falls back to 30 days ago if no payments exist (shouldn't happen).
      *
      * @param  Collection  $payments  The payments to scan
      * @return Carbon The earliest date
      */
-    protected function getEarliestEffectiveDate(Collection $payments): Carbon
+    protected function getEarliestPaymentDate(Collection $payments): Carbon
     {
-        $earliest = null;
+        $earliest = $payments->min('created_at');
 
-        foreach ($payments as $payment) {
-            $date = $payment->metadata['kotapay_effective_date'] ?? null;
-
-            if ($date !== null) {
-                $parsed = Carbon::parse($date);
-
-                if ($earliest === null || $parsed->lt($earliest)) {
-                    $earliest = $parsed;
-                }
-            }
+        if ($earliest) {
+            // Go back 1 extra day to catch any batches filed before the payment was created
+            return Carbon::parse($earliest)->subDay();
         }
 
-        // Fall back to 30 days ago if no effective dates stored (legacy payments)
-        return $earliest ?? Carbon::today()->subDays(30);
+        return Carbon::today()->subDays(30);
+    }
+
+    /**
+     * Normalize a name for fuzzy matching between our DB and Kotapay batch entries.
+     *
+     * Kotapay truncates names to ~22 chars and uppercases them, which can cut off
+     * suffixes mid-word (e.g., "PLLC" becomes "PLL"). This normalizes both sides
+     * by removing punctuation, known suffixes, and truncating to 20 chars.
+     *
+     * @param  string  $name  The name to normalize
+     * @return string Normalized name (uppercase, no punctuation, trimmed, max 20 chars)
+     */
+    protected function normalizeName(string $name): string
+    {
+        $name = strtoupper($name);
+        // Remove common punctuation
+        $name = str_replace([',', '.', "'", '"', '&'], '', $name);
+        // Remove trailing business suffixes (full and partial from Kotapay truncation)
+        $name = preg_replace('/\s+(LLC|INC|PA|PLLC|PLL|DBA|MD|DDS|PC|CORP|LTD|LP|GP|ASSO?C?)\s*$/', '', $name);
+        $name = preg_replace('/\s+/', ' ', $name);
+        $name = trim($name);
+
+        // Truncate to 20 chars to match Kotapay's truncation
+        return substr($name, 0, 20);
+    }
+
+    /**
+     * Extract a short prefix from a name for fuzzy prefix matching.
+     *
+     * Returns the first N significant characters (letters/numbers only, uppercased).
+     * Used as a secondary match when exact normalization fails due to Kotapay
+     * truncating names differently than we strip suffixes.
+     *
+     * @param  string  $name  The name to extract prefix from
+     * @param  int  $length  Prefix length (default 12)
+     * @return string The prefix
+     */
+    protected function namePrefix(string $name, int $length = 12): string
+    {
+        $name = strtoupper($name);
+        $name = str_replace([',', '.', "'", '"', '&'], '', $name);
+        $name = preg_replace('/\s+/', ' ', trim($name));
+
+        return substr($name, 0, $length);
     }
 
     // =====================================================================
@@ -1009,7 +1383,7 @@ class CheckAchPaymentStatus extends Command
         $this->table(
             ['Status', 'Count'],
             [
-                ['Settled (completed)', $this->settled],
+                ['Settled (confirmed via batch)', $this->settled],
                 ['Returned (pre-settlement)', $this->returned],
                 ['Returned (post-settlement)', $this->postSettlementReturned],
                 ['Still Processing', $this->stillProcessing],

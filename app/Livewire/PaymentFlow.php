@@ -22,9 +22,12 @@ use Flux\Flux;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Lazy;
 use Livewire\Component;
+use RyanChandler\LaravelCloudflareTurnstile\Rules\Turnstile;
 
 #[Layout('layouts::app')]
+#[Lazy]
 class PaymentFlow extends Component
 {
     use HasCardFormatting;
@@ -37,6 +40,9 @@ class PaymentFlow extends Component
     public string $currentStep = 'verify-account';
 
     public array $stepHistory = [];
+
+    // ==================== Bot Protection ====================
+    public string $turnstileToken = '';
 
     // ==================== Account Type ====================
     public $accountType = 'personal';
@@ -143,7 +149,7 @@ class PaymentFlow extends Component
 
     public ?int $selectedSavedMethodId = null;
 
-    public bool $savePaymentMethod = false;
+    public bool $savePaymentMethod = true;
 
     public bool $hasSavedMethods = false;
 
@@ -210,10 +216,12 @@ class PaymentFlow extends Component
         $this->validate([
             'last4' => 'required|digits:4',
             'lastName' => 'required|string|max:100',
+            'turnstileToken' => ['required', new Turnstile],
         ], [
             'last4.required' => 'Please enter the last 4 digits of your SSN',
             'last4.digits' => 'SSN must be exactly 4 digits',
             'lastName.required' => 'Please enter your last name',
+            'turnstileToken.required' => 'Please complete the security check.',
         ]);
 
         $searchName = $this->lastName;
@@ -222,6 +230,7 @@ class PaymentFlow extends Component
         $client = $this->paymentRepo->getClientByTaxIdAndName($this->last4, $searchName);
 
         if (! $client) {
+            $this->reset('turnstileToken');
             $this->addError('last4', 'No account found matching this information. Please check and try again.');
 
             return;
@@ -613,7 +622,55 @@ class PaymentFlow extends Component
                 return;
             }
 
-            // Payment plan success
+            // Payment plan success — save payment method if requested (and not already saved)
+            if ($this->savePaymentMethod && ! $this->selectedSavedMethodId) {
+                try {
+                    $paymentMethodService = app(CustomerPaymentMethodService::class);
+
+                    if ($this->paymentMethod === 'credit_card') {
+                        $cardNumber = str_replace(' ', '', $this->cardNumber);
+                        $paymentMethodService->create($customer, [
+                            'mpc_token' => $token,
+                            'type' => CustomerPaymentMethod::TYPE_CARD,
+                            'nickname' => $this->paymentMethodNickname,
+                            'last_four' => substr($cardNumber, -4),
+                            'brand' => CustomerPaymentMethod::detectCardBrand($cardNumber),
+                            'exp_month' => (int) substr($this->cardExpiry, 0, 2),
+                            'exp_year' => (int) ('20' . substr($this->cardExpiry, 3, 2)),
+                        ], false);
+                    } elseif ($this->paymentMethod === 'ach') {
+                        $savedMethod = $paymentMethodService->create($customer, [
+                            'mpc_token' => $token,
+                            'type' => CustomerPaymentMethod::TYPE_ACH,
+                            'nickname' => $this->paymentMethodNickname,
+                            'last_four' => substr($this->accountNumber, -4),
+                            'bank_name' => $this->bankName,
+                            'account_type' => $this->bankAccountType ?? 'checking',
+                            'is_business' => (bool) $this->isBusiness,
+                        ], false);
+
+                        // Store encrypted bank details for future scheduled payments
+                        if ($savedMethod) {
+                            $savedMethod->setBankDetails(
+                                $this->routingNumber,
+                                $this->accountNumber
+                            );
+                        }
+                    }
+
+                    Log::info('Payment method saved from payment plan flow', [
+                        'customer_id' => $customer->id,
+                        'method' => $this->paymentMethod,
+                    ]);
+                } catch (\Exception $e) {
+                    // Don't fail the payment plan if saving the method fails
+                    Log::warning('Failed to save payment method after payment plan creation', [
+                        'error' => $e->getMessage(),
+                        'customer_id' => $customer->id,
+                    ]);
+                }
+            }
+
             $this->paymentProcessed = true;
             $this->currentStep = Steps::CONFIRMATION;
 
@@ -749,6 +806,79 @@ class PaymentFlow extends Component
             'totalEngagements' => count($this->pendingEngagements),
             'isPaymentPlan' => $this->isPaymentPlan,
         ];
+    }
+
+    /**
+     * Skeleton placeholder shown instantly while the component lazy-loads.
+     *
+     * Mirrors the verify-account step layout: progress bar + card with form fields.
+     */
+    public function placeholder(): string
+    {
+        return <<<'HTML'
+        <div class="max-w-4xl mx-auto py-8 px-4">
+            {{-- Progress indicator skeleton --}}
+            <div class="mb-8">
+                <div class="sm:hidden">
+                    <div class="flex items-center justify-between mb-2">
+                        <flux:skeleton.line class="w-20" />
+                        <flux:skeleton.line class="w-24" />
+                    </div>
+                    <flux:skeleton class="h-2 w-full rounded-full" />
+                </div>
+                <div class="hidden sm:block">
+                    <div class="flex items-center justify-center">
+                        @for ($i = 0; $i < 6; $i++)
+                            <div class="flex items-center {{ $i < 5 ? 'flex-1' : '' }}">
+                                <div class="flex flex-col items-center">
+                                    <flux:skeleton class="size-10 rounded-full" />
+                                    <flux:skeleton.line class="w-14 mt-2" />
+                                </div>
+                                @if ($i < 5)
+                                    <div class="flex-1 mx-4">
+                                        <flux:skeleton class="h-0.5 w-full" />
+                                    </div>
+                                @endif
+                            </div>
+                        @endfor
+                    </div>
+                </div>
+            </div>
+
+            {{-- Verify account step skeleton --}}
+            <flux:card class="p-8">
+                <flux:skeleton.group animate="shimmer">
+                    <div class="mb-6 text-center">
+                        <flux:skeleton class="h-7 w-56 mx-auto rounded mb-2" />
+                        <flux:skeleton.line class="w-64 mx-auto" />
+                    </div>
+
+                    <div class="space-y-6 max-w-md mx-auto">
+                        {{-- SSN field --}}
+                        <div>
+                            <flux:skeleton.line class="w-36 mb-2" />
+                            <flux:skeleton class="h-10 w-full rounded-lg" />
+                        </div>
+
+                        {{-- Last name field --}}
+                        <div>
+                            <flux:skeleton.line class="w-20 mb-2" />
+                            <flux:skeleton class="h-10 w-full rounded-lg" />
+                            <flux:skeleton.line class="w-48 mt-2" />
+                        </div>
+
+                        {{-- Turnstile placeholder --}}
+                        <flux:skeleton class="h-16 w-full rounded-lg" />
+
+                        {{-- Continue button --}}
+                        <div class="flex gap-3 pt-4">
+                            <flux:skeleton class="h-10 w-full rounded-lg" />
+                        </div>
+                    </div>
+                </flux:skeleton.group>
+            </flux:card>
+        </div>
+        HTML;
     }
 
     public function render()

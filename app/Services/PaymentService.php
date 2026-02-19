@@ -12,6 +12,7 @@ use App\Repositories\PaymentRepository;
 use App\Support\Money;
 use FoleyBridgeSolutions\KotapayCashier\Services\PaymentService as KotapayPaymentService;
 use FoleyBridgeSolutions\MiPaymentChoiceCashier\Exceptions\PaymentFailedException;
+use FoleyBridgeSolutions\MiPaymentChoiceCashier\Services\ApiClient as MpcApiClient;
 use FoleyBridgeSolutions\MiPaymentChoiceCashier\Services\QuickPaymentsService;
 use FoleyBridgeSolutions\MiPaymentChoiceCashier\Services\TokenService;
 use Illuminate\Support\Facades\DB;
@@ -1472,5 +1473,216 @@ class PaymentService
                 'error' => $e->getMessage(),
             ];
         }
+    }
+
+    // ==================== Void & Refund ====================
+
+    /**
+     * Void a processing ACH payment via Kotapay.
+     *
+     * Only works for payments that are still in 'processing' status
+     * (i.e., not yet settled by the bank).
+     *
+     * @param  Payment  $payment  The payment to void
+     * @param  string  $reason  Reason for voiding
+     * @return array Result with success status
+     *
+     * @throws \InvalidArgumentException If payment is not voidable
+     */
+    public function voidAchPayment(Payment $payment, string $reason = 'Duplicate payment'): array
+    {
+        // Guard: only processing ACH payments can be voided
+        if ($payment->status !== Payment::STATUS_PROCESSING) {
+            return [
+                'success' => false,
+                'error' => "Payment #{$payment->id} is not in processing status (current: {$payment->status}).",
+            ];
+        }
+
+        if ($payment->payment_vendor !== 'kotapay' || empty($payment->vendor_transaction_id)) {
+            return [
+                'success' => false,
+                'error' => "Payment #{$payment->id} is not a Kotapay ACH payment or has no vendor transaction ID.",
+            ];
+        }
+
+        try {
+            $kotapay = $this->getKotapayService();
+            $response = $kotapay->voidPayment($payment->vendor_transaction_id);
+
+            // Validate response — Kotapay returns HTTP 200 even on errors,
+            // with "status": "fail" in the body. The vendor package should
+            // throw on this, but we double-check here as a safety net.
+            $responseStatus = $response['status'] ?? null;
+            if ($responseStatus === 'fail' || $responseStatus === 'error') {
+                $message = $response['message'] ?? 'Void rejected by Kotapay';
+                $errors = $response['data'] ?? [];
+
+                Log::error('Kotapay void returned failure status', [
+                    'payment_id' => $payment->id,
+                    'vendor_transaction_id' => $payment->vendor_transaction_id,
+                    'response_status' => $responseStatus,
+                    'message' => $message,
+                    'errors' => $errors,
+                ]);
+
+                return [
+                    'success' => false,
+                    'error' => "Kotapay void rejected: {$message}" . (! empty($errors) ? ' — ' . json_encode($errors) : ''),
+                    'response' => $response,
+                ];
+            }
+
+            $payment->markAsVoided($reason);
+
+            Log::info('ACH payment voided successfully', [
+                'payment_id' => $payment->id,
+                'vendor_transaction_id' => $payment->vendor_transaction_id,
+                'amount' => $payment->amount,
+                'reason' => $reason,
+            ]);
+
+            return [
+                'success' => true,
+                'payment_id' => $payment->id,
+                'amount' => $payment->amount,
+                'response' => $response,
+            ];
+        } catch (\Exception $e) {
+            Log::error('Failed to void ACH payment', [
+                'payment_id' => $payment->id,
+                'vendor_transaction_id' => $payment->vendor_transaction_id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * Refund a completed card payment via MiPaymentChoice.
+     *
+     * Supports full refunds (default) and partial refunds (pass $amount in cents).
+     *
+     * @param  Payment  $payment  The payment to refund
+     * @param  string  $reason  Reason for refunding
+     * @param  int|null  $amountInCents  Partial refund amount in cents (null = full refund)
+     * @return array Result with success status
+     */
+    public function refundCardPayment(Payment $payment, string $reason = 'Duplicate payment', ?int $amountInCents = null): array
+    {
+        // Guard: only completed card payments can be refunded
+        if ($payment->status !== Payment::STATUS_COMPLETED) {
+            return [
+                'success' => false,
+                'error' => "Payment #{$payment->id} is not in completed status (current: {$payment->status}).",
+            ];
+        }
+
+        if (empty($payment->transaction_id)) {
+            return [
+                'success' => false,
+                'error' => "Payment #{$payment->id} has no transaction ID for refund.",
+            ];
+        }
+
+        try {
+            $api = app(MpcApiClient::class);
+
+            $data = [
+                'TransactionType' => 'Refund',
+                'OriginalTransaction' => [
+                    'TransactionId' => (int) $payment->transaction_id,
+                ],
+                'InvoiceData' => [
+                    'TotalAmount' => $amountInCents ? ($amountInCents / 100) : $payment->amount,
+                ],
+            ];
+
+            // Look up the card token from the customer's payment methods
+            // The BCP endpoint requires a Token for refund transactions
+            $customer = $payment->customer;
+            if ($customer) {
+                $cardMethod = $customer->customerPaymentMethods()
+                    ->where('type', 'card')
+                    ->when($payment->payment_method_last_four, function ($query) use ($payment) {
+                        $query->where('last_four', $payment->payment_method_last_four);
+                    })
+                    ->first();
+
+                if ($cardMethod && $cardMethod->mpc_token) {
+                    $data['Token'] = $cardMethod->mpc_token;
+                }
+            }
+
+            $response = $api->post('/api/v2/transactions/bcp', $data);
+
+            $refundTransactionId = $response['TransactionId'] ?? $response['PnRef'] ?? null;
+            $payment->markAsRefunded($reason, $refundTransactionId);
+
+            Log::info('Card payment refunded successfully', [
+                'payment_id' => $payment->id,
+                'transaction_id' => $payment->transaction_id,
+                'refund_transaction_id' => $refundTransactionId,
+                'amount' => $amountInCents ? ($amountInCents / 100) : $payment->amount,
+                'reason' => $reason,
+            ]);
+
+            return [
+                'success' => true,
+                'payment_id' => $payment->id,
+                'amount' => $amountInCents ? ($amountInCents / 100) : $payment->amount,
+                'refund_transaction_id' => $refundTransactionId,
+                'response' => $response,
+            ];
+        } catch (\Exception $e) {
+            Log::error('Failed to refund card payment', [
+                'payment_id' => $payment->id,
+                'transaction_id' => $payment->transaction_id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * Void or refund a payment based on its type and status.
+     *
+     * - Processing ACH payments -> void via Kotapay
+     * - Completed card payments -> refund via MiPaymentChoice
+     *
+     * @param  Payment  $payment  The payment to void/refund
+     * @param  string  $reason  Reason for the void/refund
+     * @return array Result with success status and action taken
+     */
+    public function voidOrRefund(Payment $payment, string $reason = 'Duplicate payment'): array
+    {
+        if ($payment->status === Payment::STATUS_PROCESSING && $payment->payment_vendor === 'kotapay') {
+            $result = $this->voidAchPayment($payment, $reason);
+            $result['action'] = 'voided';
+
+            return $result;
+        }
+
+        if ($payment->status === Payment::STATUS_COMPLETED) {
+            $result = $this->refundCardPayment($payment, $reason);
+            $result['action'] = 'refunded';
+
+            return $result;
+        }
+
+        return [
+            'success' => false,
+            'error' => "Payment #{$payment->id} cannot be voided or refunded (status: {$payment->status}, vendor: {$payment->payment_vendor}).",
+        ];
     }
 }
